@@ -1,0 +1,209 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Category {
+  id        Int      @id @default(autoincrement())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+}
+
+model Item {
+  id           Int     @id @default(autoincrement())
+  itemCode     String  @unique
+  name         String
+  description  String?
+  unit         String  @default("pcs")
+  minimumStock Int     @default(0)
+
+  categoryId Int
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions       StockTransaction[]
+  purchaseOrderItems PurchaseOrderItem[]
+}
+
+enum Role {
+  ADMIN
+  STORE_MANAGER
+  STAFF
+  VIEWER
+}
+
+model User {
+  id       Int    @id @default(autoincrement())
+  name     String
+  email    String @unique
+  password String
+  role     Role   @default(STAFF)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions          StockTransaction[]
+  createdPurchaseOrders PurchaseOrder[]
+  auditLogs             AuditLog[]
+}
+
+model Organization {
+  id       Int     @id @default(autoincrement())
+  name     String
+  address  String?
+  phone    String?
+  email    String?
+  logoUrl  String?
+  currency String  @default("INR")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Supplier {
+  id            Int     @id @default(autoincrement())
+  name          String  @unique
+  contactPerson String?
+  phone         String?
+  email         String?
+  address       String?
+  isActive      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions   StockTransaction[]
+  purchaseOrders PurchaseOrder[]
+}
+
+enum LocationType {
+  OFFICE
+  WAREHOUSE
+  SITE
+  OTHER
+}
+
+model Location {
+  id       Int          @id @default(autoincrement())
+  name     String       @unique
+  type     LocationType @default(OFFICE)
+  address  String?
+  isActive Boolean      @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  outgoing StockTransaction[] @relation("FromLocation")
+  incoming StockTransaction[] @relation("ToLocation")
+}
+
+enum TransactionType {
+  INWARD
+  OUTWARD
+  ADJUSTMENT
+}
+
+model StockTransaction {
+  id              Int             @id @default(autoincrement())
+  type            TransactionType
+  quantity        Int
+  referenceNumber String?
+  remarks         String?
+  transactionDate DateTime        @default(now())
+
+  itemId Int
+  item   Item @relation(fields: [itemId], references: [id])
+
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  fromLocationId Int?
+  fromLocation   Location? @relation("FromLocation", fields: [fromLocationId], references: [id])
+
+  toLocationId Int?
+  toLocation   Location? @relation("ToLocation", fields: [toLocationId], references: [id])
+
+  createdById Int
+  createdBy   User @relation(fields: [createdById], references: [id])
+
+  purchaseOrderId Int?
+  purchaseOrder   PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([itemId])
+  @@index([transactionDate])
+  @@index([purchaseOrderId])
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  SENT
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+model PurchaseOrder {
+  id           Int                 @id @default(autoincrement())
+  poNumber     String              @unique
+  status       PurchaseOrderStatus @default(DRAFT)
+  orderDate    DateTime            @default(now())
+  expectedDate DateTime?
+  notes        String?
+
+  supplierId Int
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  createdById Int
+  createdBy   User @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items             PurchaseOrderItem[]
+  stockTransactions StockTransaction[]
+
+  @@index([supplierId])
+}
+
+model PurchaseOrderItem {
+  id               Int      @id @default(autoincrement())
+  quantityOrdered  Int
+  quantityReceived Int      @default(0)
+  unitPrice        Decimal? @db.Decimal(12, 2)
+
+  purchaseOrderId Int
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id])
+
+  itemId Int
+  item   Item @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
+}
+
+model AuditLog {
+  id         Int    @id @default(autoincrement())
+  action     String
+  entityType String
+  entityId   Int?
+  before     Json?
+  after      Json?
+
+  actorId Int?
+  actor   User? @relation(fields: [actorId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([createdAt])
+}

@@ -17,10 +17,10 @@ const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
 export function parseListQuery(searchParams: URLSearchParams): ListQuery {
-  const page = Math.max(1, Number(searchParams.get("page")) || 1);
+  const page = Math.max(1, Math.trunc(Number(searchParams.get("page"))) || 1);
   const pageSize = Math.min(
     MAX_PAGE_SIZE,
-    Math.max(1, Number(searchParams.get("pageSize")) || DEFAULT_PAGE_SIZE)
+    Math.max(1, Math.trunc(Number(searchParams.get("pageSize"))) || DEFAULT_PAGE_SIZE)
   );
   const search = searchParams.get("search")?.trim() || null;
   const sortBy = searchParams.get("sortBy")?.trim() || null;

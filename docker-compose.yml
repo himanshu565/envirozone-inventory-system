@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: envirostore
       POSTGRES_DB: envirostore
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - envirostore_pgdata:/var/lib/postgresql/data
 

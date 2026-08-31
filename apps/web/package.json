@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "jose": "^6.2.10",
+    "@envirozone/auth": "*",
     "next": "16.3.1",
     "react": "19.2.8",
     "react-dom": "19.2.8"

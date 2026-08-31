@@ -1,6 +1,9 @@
 import { cookies } from "next/headers";
-import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
-import type { SessionPayload } from "@/types/auth";
+import {
+  SESSION_COOKIE_NAME,
+  verifySessionToken,
+  type SessionPayload,
+} from "@envirozone/auth";
 
 export async function getSession(): Promise<SessionPayload | null> {
   const cookieStore = await cookies();

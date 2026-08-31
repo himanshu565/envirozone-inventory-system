@@ -28,6 +28,11 @@ app.use(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _next: express.NextFunction
   ) => {
+    if (err instanceof SyntaxError && "body" in err) {
+      res.status(400).json({ error: "Invalid JSON body" });
+      return;
+    }
+
     console.error(err);
     res.status(500).json({ error: "Internal server error" });
   }

@@ -5,7 +5,7 @@ import {
   SESSION_COOKIE_NAME,
   SESSION_DURATION_SECONDS,
   createSessionToken,
-} from "../lib/session";
+} from "@envirozone/auth";
 import { requireAuth } from "../middleware/auth.middleware";
 
 const router = Router();
@@ -15,6 +15,11 @@ const cookieOptions = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/",
+  // Unset for host-only cookies (e.g. local dev where web and api share
+  // "localhost"). In production, set to the shared parent domain (e.g.
+  // ".envirozone.app") so the cookie set by the API is also sent on
+  // requests to the web app's subdomain.
+  domain: process.env.COOKIE_DOMAIN || undefined,
 };
 
 router.post("/login", async (req, res) => {

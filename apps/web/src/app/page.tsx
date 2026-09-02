@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getSession } from "@/lib/auth";
 import { LogoutButton } from "@/components/logout-button";
 
@@ -10,6 +11,14 @@ export default async function Home() {
         <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
           Signed in as {session?.email} ({session?.role})
         </h1>
+        {session?.role === "ADMIN" && (
+          <Link
+            href="/users"
+            className="text-sm font-medium text-zinc-700 underline hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-zinc-100"
+          >
+            Manage users
+          </Link>
+        )}
         <LogoutButton />
       </main>
     </div>

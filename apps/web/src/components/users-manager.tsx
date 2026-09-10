@@ -81,120 +81,124 @@ export function UsersManager() {
   }
 
   return (
-    <div className="flex w-full max-w-2xl flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <form
         onSubmit={handleSubmit}
-        className="flex flex-col gap-4 rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900"
+        className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-6"
       >
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+        <h2 className="text-lg font-semibold text-slate-900">
           Create user
         </h2>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Name
-          </span>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
-          />
-        </label>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-700">
+              Name
+            </span>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Email
-          </span>
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
-          />
-        </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-700">
+              Email
+            </span>
+            <input
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Password
-          </span>
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
-          />
-        </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-700">
+              Password
+            </span>
+            <input
+              type="password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            />
+          </label>
 
-        <label className="block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            Role
-          </span>
-          <select
-            value={role}
-            onChange={(e) => setRole(e.target.value as Role)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
-          >
-            {ROLES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </label>
+          <label className="block">
+            <span className="mb-1 block text-sm font-medium text-slate-700">
+              Role
+            </span>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as Role)}
+              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+            >
+              {ROLES.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         {formError && (
-          <p className="text-sm text-red-600 dark:text-red-400">{formError}</p>
+          <p className="text-sm text-red-600">{formError}</p>
         )}
 
         <button
           type="submit"
           disabled={isSubmitting}
-          className="rounded-md bg-zinc-900 py-2 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="self-start rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
           {isSubmitting ? "Creating..." : "Create user"}
         </button>
       </form>
 
-      <div className="rounded-lg border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <h2 className="mb-4 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+      <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <h2 className="mb-4 text-lg font-semibold text-slate-900">
           Users
         </h2>
 
         {isLoading && (
-          <p className="text-sm text-zinc-500 dark:text-zinc-400">Loading...</p>
+          <p className="text-sm text-slate-500">Loading...</p>
         )}
         {listError && (
-          <p className="text-sm text-red-600 dark:text-red-400">{listError}</p>
+          <p className="text-sm text-red-600">{listError}</p>
         )}
 
         {!isLoading && !listError && (
           <table className="w-full text-left text-sm">
             <thead>
-              <tr className="border-b border-zinc-200 text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-                <th className="pb-2 font-medium">Name</th>
-                <th className="pb-2 font-medium">Email</th>
-                <th className="pb-2 font-medium">Role</th>
+              <tr className="text-xs uppercase tracking-wide text-slate-400">
+                <th className="pb-3 font-medium">Name</th>
+                <th className="pb-3 font-medium">Email</th>
+                <th className="pb-3 font-medium">Role</th>
               </tr>
             </thead>
             <tbody>
               {users.map((user) => (
                 <tr
                   key={user.id}
-                  className="border-b border-zinc-100 last:border-0 dark:border-zinc-800"
+                  className="border-t border-slate-100"
                 >
-                  <td className="py-2 text-zinc-900 dark:text-zinc-100">
+                  <td className="py-3 font-medium text-slate-900">
                     {user.name}
                   </td>
-                  <td className="py-2 text-zinc-700 dark:text-zinc-300">
+                  <td className="py-3 text-slate-500">
                     {user.email}
                   </td>
-                  <td className="py-2 text-zinc-700 dark:text-zinc-300">
-                    {user.role}
+                  <td className="py-3">
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                      {user.role}
+                    </span>
                   </td>
                 </tr>
               ))}

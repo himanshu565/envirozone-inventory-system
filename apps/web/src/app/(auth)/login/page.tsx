@@ -41,17 +41,27 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-zinc-50 px-4 dark:bg-black">
+    <div className="flex flex-1 items-center justify-center bg-slate-50 px-4">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+        className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm"
       >
-        <h1 className="mb-6 text-xl font-semibold text-zinc-900 dark:text-zinc-100">
-          Sign in to Envirostore
-        </h1>
+        <div className="mb-6 flex items-center gap-2.5">
+          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-linear-to-br from-emerald-400 to-blue-500 text-sm font-bold text-white">
+            E
+          </span>
+          <div>
+            <p className="text-sm font-semibold text-slate-900">
+              Envirostore
+            </p>
+            <p className="text-xs text-slate-500">
+              Sign in to your account
+            </p>
+          </div>
+        </div>
 
         <label className="mb-4 block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="mb-1 block text-sm font-medium text-slate-700">
             Email
           </span>
           <input
@@ -59,12 +69,12 @@ export default function LoginPage() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           />
         </label>
 
         <label className="mb-6 block">
-          <span className="mb-1 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="mb-1 block text-sm font-medium text-slate-700">
             Password
           </span>
           <input
@@ -72,12 +82,12 @@ export default function LoginPage() {
             required
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm focus:border-zinc-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-800"
+            className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
           />
         </label>
 
         {error && (
-          <p className="mb-4 text-sm text-red-600 dark:text-red-400">
+          <p className="mb-4 text-sm text-red-600">
             {error}
           </p>
         )}
@@ -85,7 +95,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded-md bg-zinc-900 py-2 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+          className="w-full rounded-md bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
         >
           {isSubmitting ? "Signing in..." : "Sign in"}
         </button>

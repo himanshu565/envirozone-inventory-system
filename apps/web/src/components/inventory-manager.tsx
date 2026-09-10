@@ -471,8 +471,16 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                       <td className="py-3 font-mono text-xs text-slate-500">
                         {item.itemCode}
                       </td>
-                      <td className="py-3 font-medium text-slate-900">
-                        {item.name}
+                      <td className="py-3">
+                        <p className="font-medium text-slate-900">{item.name}</p>
+                        {item.description && (
+                          <p
+                            className="max-w-xs truncate text-xs text-slate-500"
+                            title={item.description}
+                          >
+                            {item.description}
+                          </p>
+                        )}
                       </td>
                       <td className="py-3">
                         <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">

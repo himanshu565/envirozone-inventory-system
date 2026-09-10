@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Package,
   Warehouse,
+  ClipboardList,
   Users as UsersIcon,
 } from "lucide-react";
 import type { Role } from "@envirozone/auth";
@@ -19,6 +20,7 @@ const NAV_ITEMS: {
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/stock", label: "Stock", icon: Warehouse },
+  { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
 ];
 

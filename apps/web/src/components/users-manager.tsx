@@ -181,6 +181,7 @@ export function UsersManager() {
                 <th className="pb-3 font-medium">Name</th>
                 <th className="pb-3 font-medium">Email</th>
                 <th className="pb-3 font-medium">Role</th>
+                <th className="pb-3 font-medium">Added</th>
               </tr>
             </thead>
             <tbody>
@@ -199,6 +200,9 @@ export function UsersManager() {
                     <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
                       {user.role}
                     </span>
+                  </td>
+                  <td className="py-3 text-slate-500">
+                    {new Date(user.createdAt).toLocaleDateString()}
                   </td>
                 </tr>
               ))}

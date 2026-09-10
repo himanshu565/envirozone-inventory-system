@@ -160,6 +160,7 @@ export function LocationsManager({
               <tr className="text-xs uppercase tracking-wide text-slate-400">
                 <th className="pb-3 font-medium">Name</th>
                 <th className="pb-3 font-medium">Type</th>
+                <th className="pb-3 font-medium">Address</th>
                 <th className="pb-3 font-medium">Status</th>
                 {canManage && <th className="pb-3 font-medium">Actions</th>}
               </tr>
@@ -169,6 +170,7 @@ export function LocationsManager({
                 <tr key={location.id} className="border-t border-slate-100">
                   <td className="py-3 font-medium text-slate-900">{location.name}</td>
                   <td className="py-3 text-slate-500">{location.type}</td>
+                  <td className="py-3 text-slate-500">{location.address || "—"}</td>
                   <td className="py-3">
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${

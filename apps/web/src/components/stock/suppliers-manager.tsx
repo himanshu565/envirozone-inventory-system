@@ -9,10 +9,11 @@ type Supplier = {
   contactPerson: string | null;
   phone: string | null;
   email: string | null;
+  address: string | null;
   isActive: boolean;
 };
 
-const emptyForm = { name: "", contactPerson: "", phone: "", email: "" };
+const emptyForm = { name: "", contactPerson: "", phone: "", email: "", address: "" };
 
 export function SuppliersManager({
   canManage,
@@ -134,6 +135,15 @@ export function SuppliersManager({
               onChange={(e) => setForm((prev) => ({ ...prev, email: e.target.value }))}
               className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
             />
+            <input
+              type="text"
+              placeholder="Address"
+              value={form.address}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, address: e.target.value }))
+              }
+              className="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none sm:col-span-2"
+            />
             <button
               type="submit"
               disabled={isSubmitting}
@@ -158,6 +168,7 @@ export function SuppliersManager({
               <tr className="text-xs uppercase tracking-wide text-slate-400">
                 <th className="pb-3 font-medium">Name</th>
                 <th className="pb-3 font-medium">Contact</th>
+                <th className="pb-3 font-medium">Address</th>
                 <th className="pb-3 font-medium">Status</th>
                 {canManage && <th className="pb-3 font-medium">Actions</th>}
               </tr>
@@ -171,6 +182,7 @@ export function SuppliersManager({
                       .filter(Boolean)
                       .join(" · ") || "—"}
                   </td>
+                  <td className="py-3 text-slate-500">{supplier.address || "—"}</td>
                   <td className="py-3">
                     <span
                       className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${

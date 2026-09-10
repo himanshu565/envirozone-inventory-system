@@ -4,7 +4,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { API_URL } from "@/lib/api";
 import type { Role } from "@envirozone/auth";
 
-const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "STAFF", "VIEWER"];
+const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "ACCOUNTS", "VIEWER"];
 
 type ManagedUser = {
   id: number;
@@ -22,7 +22,7 @@ export function UsersManager() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("STAFF");
+  const [role, setRole] = useState<Role>("ACCOUNTS");
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -71,7 +71,7 @@ export function UsersManager() {
       setName("");
       setEmail("");
       setPassword("");
-      setRole("STAFF");
+      setRole("ACCOUNTS");
       await loadUsers();
     } catch {
       setFormError("Unable to reach the server");

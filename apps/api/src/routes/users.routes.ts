@@ -7,7 +7,7 @@ import { recordAudit } from "../services/audit.service";
 
 const router = Router();
 
-const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "STAFF", "VIEWER"];
+const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "ACCOUNTS", "VIEWER"];
 
 router.use(requireAuth, requireRole("ADMIN"));
 

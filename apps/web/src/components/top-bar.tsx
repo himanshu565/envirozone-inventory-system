@@ -9,6 +9,7 @@ import type { Role } from "@envirozone/auth";
 const TITLES: Record<string, string> = {
   "/": "Dashboard",
   "/inventory": "Inventory",
+  "/stock": "Stock",
   "/users": "Users",
 };
 

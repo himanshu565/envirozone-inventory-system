@@ -21,7 +21,7 @@ const PERMISSIONS: Record<Role, Action[]> = {
     "managePurchaseOrders",
     "viewReports",
   ],
-  STAFF: ["manageStock"],
+  ACCOUNTS: ["managePurchaseOrders", "viewReports"],
   VIEWER: [],
 };
 

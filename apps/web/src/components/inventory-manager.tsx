@@ -17,6 +17,7 @@ type Item = {
   minimumStock: number;
   categoryId: number;
   category: Category;
+  currentStock: number;
 };
 
 type ItemsResponse = {
@@ -456,6 +457,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                     <th className="pb-3 font-medium">Name</th>
                     <th className="pb-3 font-medium">Category</th>
                     <th className="pb-3 font-medium">Unit</th>
+                    <th className="pb-3 font-medium">Current stock</th>
                     <th className="pb-3 font-medium">Min. stock</th>
                     {canManage && <th className="pb-3 font-medium">Actions</th>}
                   </tr>
@@ -479,6 +481,15 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                       </td>
                       <td className="py-3 text-slate-500">
                         {item.unit}
+                      </td>
+                      <td
+                        className={`py-3 font-semibold tabular-nums ${
+                          item.currentStock < item.minimumStock
+                            ? "text-red-600"
+                            : "text-slate-900"
+                        }`}
+                      >
+                        {item.currentStock}
                       </td>
                       <td className="py-3 text-slate-500">
                         {item.minimumStock}
@@ -506,7 +517,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                   {items.length === 0 && (
                     <tr>
                       <td
-                        colSpan={canManage ? 6 : 5}
+                        colSpan={canManage ? 7 : 6}
                         className="py-6 text-center text-slate-500"
                       >
                         No items found.

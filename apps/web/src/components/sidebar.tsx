@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Package, Users as UsersIcon } from "lucide-react";
+import {
+  LayoutDashboard,
+  Package,
+  Warehouse,
+  Users as UsersIcon,
+} from "lucide-react";
 import type { Role } from "@envirozone/auth";
 
 const NAV_ITEMS: {
@@ -13,6 +18,7 @@ const NAV_ITEMS: {
 }[] = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
+  { href: "/stock", label: "Stock", icon: Warehouse },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
 ];
 

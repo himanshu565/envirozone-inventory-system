@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth, requireAction } from "../middleware/auth.middleware";
 import { recordAudit } from "../services/audit.service";
+import { getCurrentStockByItemIds } from "../services/stock.service";
 import {
   parseListQuery,
   toPrismaPagination,
@@ -60,7 +61,13 @@ router.get("/", async (req, res) => {
     prisma.item.count({ where }),
   ]);
 
-  res.json({ data: items, pagination: toPaginationMeta(query, total) });
+  const stockByItem = await getCurrentStockByItemIds(items.map((item) => item.id));
+  const data = items.map((item) => ({
+    ...item,
+    currentStock: stockByItem.get(item.id) ?? 0,
+  }));
+
+  res.json({ data, pagination: toPaginationMeta(query, total) });
 });
 
 router.post("/", requireAction("manageMasterData"), async (req, res) => {

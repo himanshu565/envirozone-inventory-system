@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
-    "build": "tsc",
+    "build": "prisma generate && tsc",
     "start": "node dist/server.js",
-    "seed": "tsx src/prisma/seed.ts"
+    "seed": "tsx src/prisma/seed.ts",
+    "migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
     "@envirozone/auth": "*",

@@ -8,7 +8,15 @@
   "scripts": {
     "dev": "concurrently -n web,api -c blue,green \"npm run dev -w apps/web\" \"npm run dev -w apps/api\"",
     "dev:web": "npm run dev -w apps/web",
-    "dev:api": "npm run dev -w apps/api"
+    "dev:api": "npm run dev -w apps/api",
+    "build": "npm run build -w apps/api && npm run build -w apps/web",
+    "build:web": "npm run build -w apps/web",
+    "build:api": "npm run build -w apps/api",
+    "start": "concurrently -n web,api -c blue,green \"npm run start -w apps/web\" \"npm run start -w apps/api\"",
+    "start:web": "npm run start -w apps/web",
+    "start:api": "npm run start -w apps/api",
+    "migrate:deploy": "npm run migrate:deploy -w apps/api",
+    "seed": "npm run seed -w apps/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

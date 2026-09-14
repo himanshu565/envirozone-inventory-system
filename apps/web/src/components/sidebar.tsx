@@ -8,6 +8,7 @@ import {
   Warehouse,
   ClipboardList,
   Users as UsersIcon,
+  Settings,
 } from "lucide-react";
 import type { Role } from "@envirozone/auth";
 
@@ -22,6 +23,7 @@ const NAV_ITEMS: {
   { href: "/stock", label: "Stock", icon: Warehouse },
   { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
+  { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
 ];
 
 export function Sidebar({ role }: { role: Role }) {

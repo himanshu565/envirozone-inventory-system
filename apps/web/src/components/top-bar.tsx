@@ -12,6 +12,7 @@ const TITLES: Record<string, string> = {
   "/stock": "Stock",
   "/purchase-orders": "Purchase Orders",
   "/users": "Users",
+  "/settings": "Settings",
 };
 
 export function TopBar({ email, role }: { email: string; role: Role }) {

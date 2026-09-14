@@ -5,11 +5,13 @@ you in person: what each piece does, and — more importantly — **why** it was
 instead of some other, equally valid way. Software has many correct designs; the interesting
 part is always the trade-off behind the one that was picked.
 
-The project is small right now (auth + user management only — no inventory features yet), but
-it's structured the way a much bigger production system would be. That's deliberate: the
-patterns here (monorepo, shared packages, stateless auth, layered authorization, audit
-logging, migrations) are exactly what you'd reach for at 10x or 100x the size. Learning them
-now on a small codebase is much cheaper than learning them under pressure on a large one.
+The project now covers the full core inventory workflow — master data (items, categories,
+suppliers, locations), a stock ledger, purchase orders with receiving, org-wide settings, and
+auth/RBAC — but it's still structured the way a much bigger production system would be. That's
+deliberate: the patterns here (monorepo, shared packages, stateless auth, layered authorization,
+audit logging, migrations) are exactly what you'd reach for at 10x or 100x the size. Learning
+them now, while the codebase is still small enough to hold in your head, is much cheaper than
+learning them under pressure on a large one.
 
 ---
 
@@ -24,7 +26,10 @@ now on a small codebase is much cheaper than learning them under pressure on a l
 7. [Configuration files](#7-configuration-files)
 8. [End-to-end walkthroughs](#8-end-to-end-walkthroughs)
 9. [Production-grade patterns used here (glossary)](#9-production-grade-patterns-used-here-glossary)
-10. [What's deliberately missing (and why that's OK for now)](#10-whats-deliberately-missing)
+10. [What's still missing (and why that's OK for now)](#10-whats-still-missing)
+
+See also [DEPLOYMENT.md](./DEPLOYMENT.md) for how to actually ship this somewhere — this
+guide is about *why* the code is shaped the way it is, not the deploy mechanics.
 
 ---
 
@@ -168,7 +173,7 @@ stores a bcrypt *hash*, never the plaintext — see `lib/password.ts`.
 enum Role {
   ADMIN
   STORE_MANAGER
-  STAFF
+  ACCOUNTS
   VIEWER
 }
 ```
@@ -178,6 +183,20 @@ database itself — it's structurally impossible to insert `role = "Admn"` (a ty
 `role = "SUPERADMIN"` (a role that was never designed for) into the `User` table. A string
 column would only be checked by your application code, and only if every single write path
 remembered to check it.
+
+**A real incident worth knowing about:** `ACCOUNTS` used to be `STAFF`. Renaming an enum value
+sounds like a one-line schema edit, but it touches more than the schema file: `packages/auth`
+has its own hand-written `Role` type (a second source of truth, by design — see
+[section 4](#4-the-shared-envirozoneauth-package)), `lib/rbac.ts`'s permission matrix keys off
+it, and both apps hardcode the role list for dropdowns/validation. All of those had to be
+updated together. The trickier part was the database itself: Postgres has no `DROP VALUE` for
+enums, and Prisma's own migration diff for a value rename is to *add* the new value and *drop*
+the old one — which fails outright if any row still uses the value being dropped (and one did:
+a real seeded user had `role = STAFF`). The safe fix was a hand-written migration using
+`ALTER TYPE "Role" RENAME VALUE 'STAFF' TO 'ACCOUNTS'`, which relabels the enum value in place
+by its internal identity rather than replacing it — existing rows (and the column's default)
+update automatically, with no data loss and no migration you have to write by hand for every
+row. See `apps/api/src/prisma/migrations/20260910180705_rename_staff_role_to_accounts/`.
 
 **`Organization`** — deliberately modeled as a *singleton* table (see
 `services/organization.service.ts` — there's always exactly one row, `id = 1`). Multi-tenant
@@ -212,15 +231,19 @@ binary, so summing prices with floats accumulates rounding errors. `Decimal` is 
 **`AuditLog`** — a generic "who did what to what" table (`action`, `entityType`, `entityId`,
 `before`/`after` as JSON snapshots). This is intentionally schema-loose (JSON columns) because
 an audit log needs to capture *any* entity's before/after state without a dedicated table per
-entity type. See `services/audit.service.ts` and its one current caller in
-`routes/users.routes.ts`.
+entity type. See `services/audit.service.ts` — every mutating route calls it today (user, item,
+category, supplier, location, stock transaction, purchase order, and organization changes all
+write an entry), which is exactly the point of the generic shape: a table designed once didn't
+need to change as seven more entity types started writing to it. The one gap: nothing reads
+this table back yet — see [section 10](#10-whats-still-missing).
 
 ### 3.4 Migrations — the history of the schema, not just its current shape
 
 ```
 apps/api/src/prisma/migrations/
-├── 20260822110423_init/                                    (Category, Item, User, Supplier, Location, StockTransaction)
-├── 20260831190016_add_organization_purchase_orders_audit_log/  (Organization, PurchaseOrder, PurchaseOrderItem, AuditLog)
+├── 20260822110423_init/                                         (Category, Item, User, Supplier, Location, StockTransaction)
+├── 20260831190016_add_organization_purchase_orders_audit_log/    (Organization, PurchaseOrder, PurchaseOrderItem, AuditLog)
+├── 20260910180705_rename_staff_role_to_accounts/                 (hand-written — see 3.3)
 └── migration_lock.toml
 ```
 
@@ -417,11 +440,19 @@ apps/api/src/
 ├── middleware/
 │   └── auth.middleware.ts   requireAuth / requireRole / requireAction
 ├── routes/
-│   ├── auth.routes.ts       /api/auth/{login,logout,me}
-│   └── users.routes.ts      /api/users (admin-only)
+│   ├── auth.routes.ts            /api/auth/{login,logout,me}
+│   ├── users.routes.ts           /api/users (admin-only)
+│   ├── categories.routes.ts      /api/categories (list, create)
+│   ├── items.routes.ts           /api/items (full CRUD + computed currentStock)
+│   ├── suppliers.routes.ts       /api/suppliers (list, create, update/deactivate)
+│   ├── locations.routes.ts       /api/locations (list, create, update/deactivate)
+│   ├── stock.routes.ts           /api/stock/{transactions,summary} — the ledger
+│   ├── purchase-orders.routes.ts /api/purchase-orders (create, update, receive)
+│   └── organization.routes.ts    /api/organization (singleton, admin-only writes)
 ├── services/
 │   ├── audit.service.ts      writes to AuditLog
-│   └── organization.service.ts   singleton Organization row
+│   ├── organization.service.ts   singleton Organization row
+│   └── stock.service.ts      current-stock and category-rollup aggregation (5.11)
 └── prisma/                   schema, migrations, seed (see section 3)
 ```
 
@@ -458,6 +489,9 @@ app.use(cookieParser());
 app.get("/health", ...);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", usersRoutes);
+app.use("/api/categories", categoriesRoutes);
+app.use("/api/items", itemsRoutes);
+// ...one line per resource, same shape every time (5.10-5.13)
 app.use(errorHandler); // must be last
 ```
 
@@ -522,7 +556,7 @@ Two things to internalize:
 const PERMISSIONS: Record<Role, Action[]> = {
   ADMIN: ["manageMasterData", "manageStock", "managePurchaseOrders", "manageUsers", "viewReports"],
   STORE_MANAGER: ["manageMasterData", "manageStock", "managePurchaseOrders", "viewReports"],
-  STAFF: ["manageStock"],
+  ACCOUNTS: ["managePurchaseOrders", "viewReports"],
   VIEWER: [],
 };
 export function can(role: Role, action: Action): boolean {
@@ -540,6 +574,14 @@ and it's easy for one of them to drift (e.g. someone adds a new PO route and for
 doesn't get updated). It's the same "single source of truth" idea as the shared auth package,
 applied to authorization instead of authentication.
 
+Notice `ACCOUNTS` can create and manage purchase orders but does **not** have `manageStock` —
+it's deliberately a procurement/finance role, not a warehouse one. That split is exercised for
+real by `purchase-orders.routes.ts` (5.13): creating a PO checks `managePurchaseOrders`, but
+*receiving* one — which writes `StockTransaction` rows and actually moves inventory — checks
+`manageStock` instead. An `ACCOUNTS` user can raise a PO and gets a `403` the moment they try to
+mark it received; a `STORE_MANAGER` can do both. Same route file, two different actions checked
+on two different endpoints, because they're two different real-world responsibilities.
+
 ### 5.5 `lib/list-query.ts` — pagination as a reusable contract
 
 ```ts
@@ -551,10 +593,12 @@ export function toPrismaOrderBy(query, allowedSortFields, fallbackField) { ... }
 export function toPaginationMeta(query, total): PaginationMeta { ... }
 ```
 
-No route calls this yet — it's scaffolding, written ahead of the list endpoints (items,
-suppliers, purchase orders, ...) that will need it, so that every future "list X" endpoint
-parses `?page=&pageSize=&sortBy=&sortDir=&search=` the same way instead of five slightly
-different reimplementations. A couple of details worth noticing:
+This was written *before* any list endpoint existed — scaffolding laid down ahead of items,
+purchase orders, and the stock ledger specifically so every one of them would parse
+`?page=&pageSize=&sortBy=&sortDir=&search=` the same way instead of four slightly different
+reimplementations. That bet paid off: `items.routes.ts`, `purchase-orders.routes.ts`, and
+`stock.routes.ts` (5.11, 5.13) all call the exact same four functions today. A couple of
+details worth noticing:
 
 - `pageSize` is clamped to `MAX_PAGE_SIZE = 100` — without a ceiling, a client (malicious or
   just buggy) could request `?pageSize=1000000` and force the API to load and serialize an
@@ -606,14 +650,15 @@ export function requireAction(action: Action) {
 }
 ```
 **"Is this role allowed to perform *this business action*?"** — the finer-grained sibling of
-`requireRole`, built on the `rbac.ts` permission matrix instead of a hardcoded role list. Once
-business routes exist (items, purchase orders, ...), most of them should prefer
-`requireAction("manageStock")` etc. over `requireRole(...)`, precisely so that "who can manage
-stock" stays answerable from one file (`rbac.ts`) instead of being re-decided at every route.
-`requireRole` still has its place for things that are fundamentally about identity rather than
-a business capability — user management is gated with `requireRole("ADMIN")` in
-`users.routes.ts` specifically because "can create other users" is an admin-only *identity*
-concern, not a delegable business action.
+`requireRole`, built on the `rbac.ts` permission matrix instead of a hardcoded role list. Every
+business route added since (items, suppliers, locations, stock, purchase orders) uses
+`requireAction(...)` rather than `requireRole(...)`, precisely so that "who can manage stock" or
+"who can manage purchase orders" stays answerable from one file (`rbac.ts`) instead of being
+re-decided at every route. `requireRole` still has its place for things that are fundamentally
+about identity rather than a business capability — user management is gated with
+`requireRole("ADMIN")` in `users.routes.ts`, and organization settings the same way in
+`organization.routes.ts` (5.14), because "can create other users" or "can change the company's
+name and currency" are admin-only *identity* concerns, not delegable business actions.
 
 **401 vs 403 — worth being precise about, since the codebase is:** `401 Unauthorized` means
 "I don't know who you are" (no session, or an invalid one) — the correct client response is
@@ -762,6 +807,121 @@ is the standard way to implement "get-or-create" for a singleton row atomically 
 with itself creating two rows, the way a manual "check if it exists, then create" would under
 concurrent requests.
 
+### 5.10 `items.routes.ts` / `categories.routes.ts` — master data, and the shape every list endpoint follows
+
+Every route that lists something follows the same skeleton now: `parseListQuery` the query
+string, build a Prisma `where` from an optional `search` term, run the `findMany` and `count`
+in parallel with `Promise.all`, and return `{ data, pagination }`. Once you've read one of these
+(`items.routes.ts` is the fullest example — search, sort, pagination, and a computed field, all
+in one handler), you've effectively read the shape of `suppliers`, `locations`, and
+`purchase-orders` too.
+
+The one thing `items.routes.ts` does that the simpler resources don't:
+
+```ts
+const stockByItem = await getCurrentStockByItemIds(items.map((item) => item.id));
+const data = items.map((item) => ({ ...item, currentStock: stockByItem.get(item.id) ?? 0 }));
+```
+
+`currentStock` isn't a column — it's computed on every read from the `StockTransaction` ledger
+(5.11) and attached to each item in the response. This is the direct consequence of the
+event-sourcing-lite decision on `StockTransaction` (section 3.3): there's no mutable "quantity"
+field to just select, so every place that needs to *show* stock has to ask the ledger for it.
+
+`Category` deliberately has no `PATCH` or `DELETE` route, and `Item` has full CRUD. That's not
+an oversight — a category is closer to a tag (create it, use it, rename it rarely) than an
+entity with a lifecycle, so the extra endpoints weren't built until something needed them.
+
+### 5.11 `stock.routes.ts` / `services/stock.service.ts` — turning the ledger into a number
+
+The ledger pattern (section 3.3) means "current stock" has to be *computed*, not read. That
+computation lives in one place — `stock.service.ts` — so it's identical everywhere it's needed:
+the items list (5.10), the category-level summary, and the dashboard's low-stock widget.
+
+```ts
+const grouped = await prisma.stockTransaction.groupBy({
+  by: ["itemId", "type"],
+  where: { itemId: { in: itemIds } },
+  _sum: { quantity: true },
+});
+```
+
+One `groupBy` query gets the summed quantity per item *per transaction type*, instead of
+fetching every row and reducing in application code — the aggregation happens in Postgres,
+which is the difference between a query that scales and one that doesn't as the ledger grows.
+Turning those sums into a single "current stock" number needs a sign convention, and this is
+worth being explicit about because it's not obvious from the schema alone: `INWARD` and
+`OUTWARD` quantities are always entered as positive numbers (the API rejects a negative one for
+these two types) and the *type* supplies the sign — `+quantity` for inward, `-quantity` for
+outward. `ADJUSTMENT` is different: its quantity carries its own sign, because a stock-count
+correction can go either direction (`+3` for "found extra on the shelf", `-3` for "found
+damaged"), and forcing a fixed sign onto a correction that's inherently bidirectional would
+just move the ambiguity into `remarks` text instead of resolving it.
+
+`POST /api/stock/transactions` is gated on `manageStock`, not `manageMasterData` — recording a
+physical stock movement is a different responsibility from editing what an item *is*, and the
+two are given to different roles for exactly that reason (5.4).
+
+### 5.12 `suppliers.routes.ts` / `locations.routes.ts` — deactivate, don't delete
+
+Both models have an `isActive` boolean in the schema, and neither route file has a `DELETE`
+endpoint. That's deliberate, not missing: a `Supplier` or `Location` referenced by historical
+`StockTransaction` rows can't be deleted without either breaking that history or cascading the
+delete into the ledger — and silently losing ledger rows is exactly the failure mode the ledger
+pattern exists to prevent (section 3.3). Toggling `isActive` gets you the real-world effect
+("stop offering this in dropdowns for new transactions") without touching anything that already
+happened. `PATCH` on both routes accepts a partial update *and* the `isActive` toggle through
+the same endpoint, rather than a separate `/deactivate` route — it's just another field being
+set.
+
+### 5.13 `purchase-orders.routes.ts` — the fullest write path in the app
+
+A purchase order has a real lifecycle (`DRAFT → SENT → PARTIALLY_RECEIVED → RECEIVED`, or
+`CANCELLED` at any point), and one endpoint here is worth reading closely: `POST
+/:id/receive`. Recording a receipt has to do three things *together* — update how much of each
+line item has been received, append `StockTransaction` rows for the physical movement, and
+recompute the order's status — and none of those three should happen without the other two, so
+the whole thing runs inside `prisma.$transaction(...)`. If the process crashed halfway through
+without that, you could end up with stock recorded as received but the PO still showing `SENT`,
+or vice versa — a state no valid sequence of real-world events could produce.
+
+```ts
+if (poItem.quantityReceived + quantity > poItem.quantityOrdered) {
+  res.status(400).json({ error: `Cannot receive more than ordered for item ${poItem.itemId}` });
+}
+```
+
+Over-receiving is rejected outright rather than silently allowed — a receipt that doesn't match
+what was ordered is far more likely to be a data-entry mistake than a legitimate case, and the
+cost of asking the user to double-check is much lower than the cost of a stock count that's now
+wrong for a reason nobody will remember in a month.
+
+```ts
+const fullyReceived = items.every((i) => i.quantityReceived >= i.quantityOrdered);
+const status = fullyReceived ? "RECEIVED" : anyReceived ? "PARTIALLY_RECEIVED" : order.status;
+```
+
+Status isn't something a user sets by hand when receiving stock — it's *derived* from the line
+items every time a receipt is recorded. That's the same instinct as the ledger pattern applied
+one level up: trust computed state over a value someone has to remember to update. (The status
+field is still directly editable via `PATCH /:id` for the parts of the lifecycle that aren't
+about receiving — moving a `DRAFT` to `SENT`, or cancelling an order — where there's no
+underlying data to derive it from.)
+
+Every `StockTransaction` created by a receipt carries `purchaseOrderId`, closing the loop the
+schema was built for: the ledger doesn't just say "8 units came in", it says "8 units came in,
+*because of this specific order*" — answerable later without cross-referencing anything by hand.
+
+### 5.14 `organization.routes.ts` — reusing the singleton pattern for settings
+
+The route is thin on purpose — `getOrganization`/`updateOrganization` already existed in
+`services/organization.service.ts` (5.9) before any route called them, so this file is close to
+pure HTTP glue. `GET` is open to anyone authenticated (the org's name/currency are the kind of
+thing every screen might eventually want to show), but `PATCH` is gated `requireRole("ADMIN")`
+rather than `requireAction("manageMasterData")` — changing the company's own name, currency, or
+contact details is an identity-level decision about the business itself, not a delegable
+day-to-day operation, which is the same distinction section 5.6 draws for user management.
+
 ---
 
 ## 6. The web app (`apps/web`)
@@ -769,13 +929,25 @@ concurrent requests.
 ```
 apps/web/src/
 ├── app/
-│   ├── layout.tsx              root HTML shell, fonts
-│   ├── page.tsx                home page (protected)
-│   ├── (auth)/login/page.tsx   login page (public)
-│   └── users/page.tsx          admin-only user management page
+│   ├── layout.tsx                    root HTML shell, fonts (theme-agnostic — see 6.4)
+│   ├── (auth)/login/page.tsx         login page (public)
+│   └── (app)/                        every authenticated page — one shared layout, one auth gate
+│       ├── layout.tsx                 the shell: Sidebar + TopBar + redirect-if-no-session (6.4)
+│       ├── page.tsx                   dashboard (6.5)
+│       ├── inventory/page.tsx         items + categories (6.6)
+│       ├── stock/page.tsx             ledger, suppliers, locations, category summary (6.7)
+│       ├── purchase-orders/
+│       │   ├── page.tsx                list + create
+│       │   └── [id]/page.tsx           detail + receive (6.8)
+│       ├── users/page.tsx             admin-only, extra page-level role check (6.2)
+│       └── settings/page.tsx          admin-only, organization settings (6.9)
 ├── components/
-│   ├── logout-button.tsx
-│   └── users-manager.tsx
+│   ├── sidebar.tsx, top-bar.tsx       the app shell (6.4)
+│   ├── dashboard.tsx
+│   ├── users-manager.tsx, inventory-manager.tsx
+│   ├── stock/                        four components composed by stock/page.tsx (6.7)
+│   ├── purchase-orders/
+│   └── settings/
 ├── lib/
 │   ├── api.ts                  API_URL constant
 │   └── auth.ts                 getSession() — server-side session read
@@ -855,14 +1027,16 @@ export async function getSession(): Promise<SessionPayload | null> {
 }
 ```
 
-This is what a **Server Component** page calls (see `page.tsx`, `users/page.tsx`) to find out
-who's logged in — reading the cookie directly via Next's `cookies()` API and verifying it the
-same way `proxy.ts` does. Note this is genuinely redundant with `proxy.ts` for "is anyone
-logged in at all" (that question is already answered before the page even starts rendering) —
-but it's **not** redundant for the second question `users/page.tsx` asks:
+This is what a **Server Component** page calls to find out who's logged in — reading the
+cookie directly via Next's `cookies()` API and verifying it the same way `proxy.ts` does. The
+`(app)` layout (6.4) already calls it once, to redirect anyone with no session before rendering
+the shell at all — genuinely redundant with `proxy.ts` for "is anyone logged in", since that
+question is already answered before the page even starts rendering. But it's **not** redundant
+for the *second* question a couple of pages ask — `/users` and `/settings` both need "is this
+specifically an admin?", which `proxy.ts` has no way to know:
 
 ```ts
-// app/users/page.tsx
+// app/(app)/users/page.tsx
 const session = await getSession();
 if (session?.role !== "ADMIN") redirect("/");
 ```
@@ -883,7 +1057,7 @@ entirely, which is exactly why the API's own `requireRole` check is the check th
 matters; the page-level one just avoids showing an admin-only UI to someone who's going to get
 a 403 from every button in it anyway.
 
-### 6.3 Client components — `logout-button.tsx`, `users-manager.tsx`
+### 6.3 Client components — the `"use client"` boundary
 
 ```tsx
 "use client";
@@ -891,11 +1065,12 @@ a 403 from every button in it anyway.
 await fetch(`${API_URL}/api/auth/logout`, { method: "POST", credentials: "include" });
 ```
 
-Both of these are marked `"use client"` because they need **interactivity**: `onClick`
-handlers, `useState` for form fields and loading states, `useEffect` to fetch data after the
-component mounts in the browser. Server Components can't do any of that — they run once, on
-the server, and produce static HTML; there's no "component instance" left alive afterward to
-attach an event handler to.
+(That's `top-bar.tsx`'s logout handler — every interactive piece of this app, from the sidebar
+nav to every manager component, is marked `"use client"` for the same reason.) They need
+**interactivity**: `onClick` handlers, `useState` for form fields and loading states,
+`useEffect` to fetch data after the component mounts in the browser. Server Components can't do
+any of that — they run once, on the server, and produce static HTML; there's no "component
+instance" left alive afterward to attach an event handler to.
 
 Notice the pattern: **the browser calls the API directly** (`fetch(`${API_URL}/...`,
 { credentials: "include" })`), not through a Next.js API route that proxies to the backend.
@@ -912,7 +1087,105 @@ reading the session cookie to decide what to render).
 manually splicing the new user into local state. That's a deliberate simplicity choice: it
 costs one extra network request, but it guarantees the displayed list is always exactly what
 the server has — no risk of the UI's local copy silently drifting from reality (e.g. if the
-server applied some transformation, or another admin created a user in the same moment).
+server applied some transformation, or another admin created a user in the same moment). Every
+other manager component added since (inventory, stock, purchase orders, settings) follows the
+identical shape: `useState` for the list, a `load...()` function called once on mount and again
+after every successful mutation, a separate `useState` for the form. It's worth knowing this
+pattern trips one specific ESLint rule — `react-hooks/set-state-in-effect` flags the mount-time
+`useEffect(() => { loadX(); }, [])` call in every one of these components, because calling
+`setState` synchronously inside an effect can, in general, cause cascading renders. It's a
+deliberate, accepted exception here rather than a bug: the alternative (fetching in a Server
+Component and passing data down) would fight the "browser calls the API directly" pattern this
+whole section is about, and the cascading-render risk the rule warns about doesn't apply to a
+one-shot mount-time fetch.
+
+### 6.4 The `(app)` shell — `layout.tsx`, `sidebar.tsx`, `top-bar.tsx`
+
+Every authenticated page lives under the `(app)` route group (a Next.js convention: the
+parentheses mean the folder organizes routes without adding a path segment — `(app)/inventory`
+is still just `/inventory`), sharing one `layout.tsx` that does three things once instead of
+seven times: reads the session, redirects to `/login` if there isn't one, and renders the
+`Sidebar` + `TopBar` shell around whatever page is active. Before this existed, session-reading
+and the page-level admin checks (6.2) were the only auth logic on each page; now the *generic*
+"is anyone logged in" check lives in exactly one file, and each page only has to add the
+page-specific check on top (`/users` and `/settings` still check `role === "ADMIN"` themselves
+— the shared layout has no way to know that's required for those two paths specifically).
+
+`Sidebar` is deliberately styled independent of the rest of the app's theme — a fixed dark
+teal background regardless of light/dark mode — which is itself downstream of a real decision:
+this app doesn't follow the OS `prefers-color-scheme` at all anymore. It used to (Tailwind's
+`dark:` variants, applied throughout), until the design intentionally moved to a single
+committed light theme — every `dark:` class was stripped, and `globals.css`'s
+`prefers-color-scheme: dark` media query was removed with it. A dark sidebar next to an
+otherwise-light app isn't a leftover from that; it's a common enterprise-dashboard convention
+(persistent dark nav rail, light content area) applied on purpose, unrelated to the app's own
+light/dark story.
+
+`TopBar` derives the page title from the current pathname (a small `TITLES` lookup, with a
+prefix match so `/purchase-orders/42` still resolves to "Purchase Orders") rather than each
+page passing its own title down — one more place where "add a new page" means "add one line",
+not "update N files that all need to agree."
+
+### 6.5 The dashboard — `dashboard.tsx`
+
+The stat cards, the low-stock alert table, and the "recently added items" table all come from
+**one** fetch: `GET /api/items?pageSize=100&sortBy=createdAt&sortDir=desc`. Rather than a
+separate request per widget, the dashboard fetches the largest page the API allows (5.5's
+`MAX_PAGE_SIZE`) once and derives everything client-side — `recentItems` is just the first five,
+`lowStockItems` is the same array filtered to `currentStock < minimumStock` and sorted by how
+far under. That's a real trade-off, not a free lunch: on an inventory with more than 100 items,
+both widgets become a preview of the *most recent* 100 rather than a guaranteed-complete answer
+— acceptable for a dashboard glance, not acceptable as a substitute for the Inventory page's own
+paginated, complete view.
+
+Color is used as a second channel of meaning throughout, not just decoration: blue marks
+primary/items-related things, emerald marks anything category-related, amber marks the one
+metric meant to draw the eye (`Low stock`, which also turns its own number red when the count
+is above zero). That convention is set here and reused verbatim in Inventory and Stock (6.6,
+6.7) — a category pill is emerald *everywhere* in the app, not just on the dashboard.
+
+### 6.6 Inventory — `inventory-manager.tsx`
+
+The items table's `currentStock` column reuses the exact red-below-minimum highlight the
+dashboard uses — the same comparison (`currentStock < minimumStock`), styled the same way,
+because it's the same fact and a user shouldn't have to learn two different visual languages
+for it depending on which page they're on. `Item.description` is shown as a small muted line
+under the item's name rather than as its own table column — it's often long free text, and a
+dedicated column either truncates it uselessly or blows out the table's width; a secondary line
+(with the full text in a `title` tooltip) reads naturally without either problem.
+
+### 6.7 Stock — `components/stock/`
+
+One page (`stock/page.tsx`) composes four independent components — `CategoryStockSummary`,
+`StockMovements` (the record-a-movement form plus the ledger table), `SuppliersManager`,
+`LocationsManager` — each fetching its own data. That independence caused a real bug worth
+knowing about: adding a new supplier through `SuppliersManager` didn't make it appear in
+`StockMovements`'s "Supplier" dropdown until a full page reload, because the two components had
+no way to know about each other's writes. The fix is a small shared-refresh-signal pattern in
+`stock-manager.tsx` — a `useState` counter (`optionsVersion`) that `SuppliersManager` and
+`LocationsManager` bump via an `onChange` callback after every successful create/update, which
+`StockMovements` watches as a `useEffect` dependency to refetch its dropdown options. It's the
+minimum plumbing needed to keep independently-fetching sibling components honest about each
+other's writes, without reaching for a shared state library for four components.
+
+### 6.8 Purchase orders — list + detail
+
+Two routes, matching the two things you do with a PO: `/purchase-orders` lists them and creates
+new ones (dynamic line items — an "Add line" button appends another item/quantity/price row to
+local form state before submit); `/purchase-orders/[id]` is where you actually manage one —
+status, notes, and the receive form. Each line item's "receive now" input is capped at
+`quantityOrdered - quantityReceived` in the UI, mirroring the same guard the API enforces
+server-side (5.13) — the UI check is a courtesy that prevents an obviously-invalid submission
+before it round-trips to the server; the API's own check is the one that actually matters,
+same "UI convenience vs. server-side enforcement" split as 6.2's page-level admin gating.
+
+### 6.9 Settings — `organization-settings.tsx`
+
+Follows the same self-contained-component pattern as everything else in this section, gated the
+same two ways `/users` is (6.2): the page redirects non-admins server-side, and the sidebar
+simply never renders the "Settings" link for them — belt and suspenders, with the API's own
+`requireRole("ADMIN")` on `PATCH /api/organization` (5.14) as the check that actually can't be
+bypassed by curling the API directly.
 
 ---
 
@@ -972,12 +1245,16 @@ In production, you would not run the database in Docker Compose next to the app 
 all.
 
 ### `.env` files (not committed to git — see `.gitignore`)
-Each app has its own: `apps/api/.env` needs `DATABASE_URL` and `JWT_SECRET`; `apps/web/.env`
-needs `JWT_SECRET` (must be the **identical** value — it's how the web app verifies tokens the
-API signed) and `NEXT_PUBLIC_API_URL`. The `NEXT_PUBLIC_` prefix is a Next.js convention: only
-env vars prefixed that way are ever bundled into client-side JavaScript and sent to the
-browser; anything without that prefix (like `JWT_SECRET`) stays server-only, which is exactly
-why `JWT_SECRET` deliberately does *not* have that prefix — it must never reach the browser.
+Each app has its own, documented in full in [`apps/api/.env.example`](../apps/api/.env.example)
+and [`apps/web/.env.example`](../apps/web/.env.example) — copy each to `.env` and fill it in.
+The one thing worth calling out here rather than just in the example file: `JWT_SECRET` must be
+the **identical** value in both apps — it's how the web app verifies tokens the API signed, and
+if they diverge, login will appear to succeed with no error anywhere while every subsequent page
+load looks logged-out. `apps/web`'s vars are also where the `NEXT_PUBLIC_` prefix matters: only
+env vars prefixed that way are ever bundled into client-side JavaScript and sent to the browser
+(`NEXT_PUBLIC_API_URL` needs it; `JWT_SECRET` deliberately does not — it must never reach the
+browser). See [DEPLOYMENT.md](./DEPLOYMENT.md) for the full list of what each app needs in a
+real deployment beyond local dev.
 
 ---
 
@@ -1029,6 +1306,33 @@ why `JWT_SECRET` deliberately does *not* have that prefix — it must never reac
 3. The page component (`page.tsx`) never even executes — the redirect happens in middleware,
    before rendering starts.
 
+### 8.4 Receiving a purchase order — the one flow that touches everything
+
+Worth walking through end to end because it's where the ledger pattern (3.3), the RBAC action
+split (5.4, 5.11), and the atomic-transaction decision (5.13) all show up in the same request.
+
+1. A `STORE_MANAGER` is on `/purchase-orders/7`, a `PARTIALLY_RECEIVED` order for 20 units of
+   an item, 8 already received (6.8). They enter `12` in that line's "receive now" field and
+   click **Record receipt**.
+2. Browser calls `POST /api/purchase-orders/7/receive` with `{ receipts: [{ itemId, quantity: 12 }] }`.
+3. API: `requireAction("manageStock")` runs first — this is *not* `managePurchaseOrders`, so an
+   `ACCOUNTS` user who could see and even create this PO would get a `403` here (5.4, 5.11).
+4. The handler re-validates server-side that `8 + 12` doesn't exceed the `20` ordered (never
+   trusting the UI's own cap from 6.8), then opens `prisma.$transaction(...)`.
+5. Inside that transaction: `PurchaseOrderItem.quantityReceived` becomes `20`; a new
+   `StockTransaction` row is created — `type: INWARD`, `quantity: 12`, `purchaseOrderId: 7`,
+   `supplierId` copied from the PO, `referenceNumber` set to the PO's own number; the order's
+   items are re-checked and, since every line is now fully received, `status` is set to
+   `RECEIVED`. All three writes commit together or not at all.
+6. `recordAudit(...)` writes a `purchaseOrder.receive` entry — `before`/`after` status, and
+   which items were received in what quantity — to `AuditLog` (3.3, 5.9). Nothing reads this
+   back yet (10), but it's there.
+7. Response includes the updated order. The UI re-fetches and re-renders: the status badge
+   flips to `RECEIVED`, the "receive now" input for that line disappears (`remaining` is now
+   `0`), and the next time anyone opens `/inventory` or the dashboard, `currentStock` for that
+   item is `12` higher — not because anything told it to be, but because it's recomputed from
+   the ledger (5.11) every time it's read, and the ledger now has one more row in it.
+
 ---
 
 ## 9. Production-grade patterns used here (glossary)
@@ -1067,33 +1371,66 @@ recognizing anywhere you see them:
   `JWT_SECRET`, `COOKIE_DOMAIN`) live in `.env` files outside version control, never
   hardcoded, so the same code runs correctly in dev, staging, and production by swapping
   configuration, not code.
+- **Derived state over stored state** — `Item.currentStock` and `PurchaseOrder.status` are both
+  computed from other rows every time they're read, never stored as a value something has to
+  remember to keep in sync (5.11, 5.13). Costs a query at read time; buys the guarantee that the
+  value shown is never stale relative to the data it's derived from.
+- **Soft deactivation over deletion for referenced reference data** — `Supplier`/`Location`
+  toggle `isActive` rather than being deleted, because history (`StockTransaction` rows) can
+  point at them; "no longer offered" and "never existed" are different facts, and only one of
+  them is safe to represent by removing a row (5.12).
+- **Multi-step writes wrapped in a database transaction** — when an operation has to update more
+  than one thing consistently (PO receiving: line items, ledger rows, and order status all at
+  once), `prisma.$transaction(...)` makes it commit atomically — no state a crash mid-operation
+  could leave behind that no real sequence of events would ever produce (5.13).
+- **A hand-written migration for what the ORM's diff tool can't express safely** — Prisma will
+  generate a migration for an enum value rename, but its default diff (drop the old value, add
+  the new one) fails outright against rows still using it. `ALTER TYPE ... RENAME VALUE` is a
+  single safe statement for exactly this case, and it's fine — expected, even — to write SQL by
+  hand when the tool's default output is the wrong shape for what you're actually doing (3.3).
 
 ---
 
-## 10. What's deliberately missing
+## 10. What's still missing
 
 Being honest about the current state, so nothing here is mistaken for an oversight rather than
-a "not built yet":
+a "not built yet." The core business workflow is done now — items, categories, suppliers,
+locations, the stock ledger, purchase orders (including receiving), organization settings, and
+RBAC all exist and are exercised end to end. What's left is mostly operational hardening, not
+missing features:
 
-- **No business features yet** — no items, stock transactions, purchase orders, suppliers, or
-  reports through the API/UI, despite the schema modeling all of them. `lib/list-query.ts` and
-  `rbac.ts`'s full action set exist specifically *because* those routes are coming.
+- **`viewReports` is a dead permission** — it's in `rbac.ts`'s matrix, assigned to `ADMIN`,
+  `STORE_MANAGER`, and `ACCOUNTS`, and checked by exactly zero routes. This is the same state
+  `managePurchaseOrders` was in until this project's purchase-orders feature got built — worth
+  reading as "the next business feature, already reserved a permission" rather than dead code to
+  delete. There's no dedicated reports view yet; the dashboard's stat cards and low-stock table
+  are the closest thing today, and they don't check this permission at all (they're visible to
+  every authenticated role).
+- **The audit log has no reader** — `recordAudit` is called from every mutating route (3.3,
+  5.9), so the *data* — who changed what, when — is all there, sitting in `AuditLog`. Nothing
+  reads it back: no `GET` route, no admin page. It's being recorded for a future that hasn't
+  arrived yet, not being recorded for no reason.
+- **No rate limiting** — `/api/auth/login` has no protection against a brute-force
+  password-guessing script hammering it. Now that this project is meant to actually be deployed
+  (see [DEPLOYMENT.md](./DEPLOYMENT.md)), this is the single most important gap left to close.
 - **No session revocation** — see section 4; a compromised token is valid until it expires,
   with no "log out everywhere" mechanism yet.
-- **No rate limiting** — `/api/auth/login` in particular has no protection against a brute-force
-  password-guessing script hammering it. This is one of the more important gaps to close before
-  any real deployment.
-- **No automated tests** — the `server.ts`/`app.ts` split (section 5.1) was specifically built
-  to make integration testing straightforward later; nothing exercises that possibility yet.
-- **No CI pipeline** — nothing currently runs `tsc`, tests, or migration checks automatically
-  on a push/PR.
+- **No automated tests, no CI** — the `server.ts`/`app.ts` split (5.1) was specifically built to
+  make integration testing straightforward later; nothing exercises that possibility yet, and
+  nothing runs `tsc`/lint/migration checks automatically on a push or PR. Every verification
+  this project has had so far has been a human (or an agent) running the checks by hand each
+  time — that doesn't scale past one contributor for long.
 - **No password reset / email verification flow** — an admin creates every account with a
-  password directly (section 5.8); there's no "forgot password" or email-confirmation story.
+  password directly (5.8); there's no "forgot password" or email-confirmation story.
 - **No structured logging or monitoring** — errors go to `console.error`; nothing is shipped to
   an aggregator, and there's no request logging beyond Express's defaults.
-- **`COOKIE_DOMAIN` must be set explicitly before a split-subdomain production deploy** —
-  covered in section 5.7; this is a one-line env var, not a code change, but it's easy to
-  forget until login mysteriously "doesn't work" in production.
+- **Dependencies need periodic re-auditing, not a one-time check** — this project shipped with a
+  *critical* unauthenticated-RCE advisory sitting in its exact pinned Next.js version for a
+  while before anyone ran `npm audit` and caught it (now patched — see `DEPLOYMENT.md`'s git
+  history). `npm audit` costs nothing to run and nothing here runs it automatically; it should
+  become a CI check the moment CI exists, not something that depends on someone remembering.
 
 None of these are wrong to be missing at this stage — they're the next things to reach for, in
-roughly the order a real production rollout would force them into priority.
+roughly the order a real production rollout would force them into priority. See
+[DEPLOYMENT.md](./DEPLOYMENT.md#7-known-gaps-worth-knowing-before-you-ship) for the subset of
+this list that specifically matters before a first deploy.

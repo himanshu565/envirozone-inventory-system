@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { ArrowLeftRight } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type TransactionType = "INWARD" | "OUTWARD" | "ADJUSTMENT";
 
@@ -50,6 +55,8 @@ export function StockMovements({
   onRecorded: () => void;
   optionsVersion: number;
 }) {
+  const toast = useToast();
+
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
@@ -61,6 +68,7 @@ export function StockMovements({
     total: 0,
     totalPages: 1,
   });
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [isLoadingLedger, setIsLoadingLedger] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -93,12 +101,12 @@ export function StockMovements({
     }
   }
 
-  async function loadLedger(page = pagination.page) {
+  async function loadLedger(page = pagination.page, sortDirection = sortDir) {
     setIsLoadingLedger(true);
     setListError(null);
     try {
       const response = await fetch(
-        `${API_URL}/api/stock/transactions?page=${page}&pageSize=${pagination.pageSize}&sortBy=transactionDate&sortDir=desc`,
+        `${API_URL}/api/stock/transactions?page=${page}&pageSize=${pagination.pageSize}&sortBy=transactionDate&sortDir=${sortDirection}`,
         { credentials: "include" }
       );
       if (!response.ok) throw new Error("Failed to load ledger");
@@ -120,6 +128,12 @@ export function StockMovements({
   useEffect(() => {
     loadOptions();
   }, [optionsVersion]);
+
+  function handleSort() {
+    const nextDir = sortDir === "asc" ? "desc" : "asc";
+    setSortDir(nextDir);
+    loadLedger(1, nextDir);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -158,6 +172,7 @@ export function StockMovements({
       }));
       await loadLedger(1);
       onRecorded();
+      toast.success("Stock movement recorded");
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -359,11 +374,19 @@ export function StockMovements({
         </div>
 
         <div className="px-6 py-4">
-          {isLoadingLedger && <p className="text-sm text-slate-500">Loading...</p>}
+          {isLoadingLedger && <TableSkeleton rows={5} cols={6} />}
           {listError && <p className="text-sm text-red-600">{listError}</p>}
 
           {!isLoadingLedger && !listError && transactions.length === 0 && (
-            <p className="text-sm text-slate-500">No stock movements recorded yet.</p>
+            <EmptyState
+              icon={ArrowLeftRight}
+              title="No stock movements recorded yet"
+              description={
+                canManage
+                  ? "Record your first inward, outward, or adjustment above."
+                  : undefined
+              }
+            />
           )}
 
           {!isLoadingLedger && !listError && transactions.length > 0 && (
@@ -371,7 +394,13 @@ export function StockMovements({
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-slate-400">
-                    <th className="pb-3 font-medium">Date</th>
+                    <SortableHeader
+                      label="Date"
+                      field="transactionDate"
+                      sortBy="transactionDate"
+                      sortDir={sortDir}
+                      onSort={handleSort}
+                    />
                     <th className="pb-3 font-medium">Type</th>
                     <th className="pb-3 font-medium">Item</th>
                     <th className="pb-3 font-medium">Qty</th>

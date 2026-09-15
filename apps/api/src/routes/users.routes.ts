@@ -8,13 +8,20 @@ import { recordAudit } from "../services/audit.service";
 const router = Router();
 
 const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "ACCOUNTS", "VIEWER"];
+const ALLOWED_SORT_FIELDS = ["name", "email", "role", "createdAt"];
 
 router.use(requireAuth, requireRole("ADMIN"));
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
+  const sortBy =
+    typeof req.query.sortBy === "string" && ALLOWED_SORT_FIELDS.includes(req.query.sortBy)
+      ? req.query.sortBy
+      : "createdAt";
+  const sortDir = req.query.sortDir === "desc" ? "desc" : "asc";
+
   const users = await prisma.user.findMany({
     select: { id: true, name: true, email: true, role: true, createdAt: true },
-    orderBy: { createdAt: "asc" },
+    orderBy: { [sortBy]: sortDir },
   });
 
   res.json(users);

@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Users as UsersIcon } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import type { Role } from "@envirozone/auth";
+import { useToast } from "@/components/ui/toast-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 const ROLES: Role[] = ["ADMIN", "STORE_MANAGER", "ACCOUNTS", "VIEWER"];
 
@@ -15,9 +20,13 @@ type ManagedUser = {
 };
 
 export function UsersManager() {
+  const toast = useToast();
+
   const [users, setUsers] = useState<ManagedUser[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState("createdAt");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -26,11 +35,12 @@ export function UsersManager() {
   const [formError, setFormError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  async function loadUsers() {
+  async function loadUsers(sortField = sortBy, sortDirection = sortDir) {
     setIsLoading(true);
     setListError(null);
     try {
-      const response = await fetch(`${API_URL}/api/users`, {
+      const params = new URLSearchParams({ sortBy: sortField, sortDir: sortDirection });
+      const response = await fetch(`${API_URL}/api/users?${params}`, {
         credentials: "include",
       });
       if (!response.ok) {
@@ -46,7 +56,15 @@ export function UsersManager() {
 
   useEffect(() => {
     loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleSort(field: string) {
+    const nextDir = field === sortBy && sortDir === "asc" ? "desc" : "asc";
+    setSortBy(field);
+    setSortDir(nextDir);
+    loadUsers(field, nextDir);
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -73,6 +91,7 @@ export function UsersManager() {
       setPassword("");
       setRole("ACCOUNTS");
       await loadUsers();
+      toast.success(`User "${data.name}" created`);
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -167,21 +186,23 @@ export function UsersManager() {
           Users
         </h2>
 
-        {isLoading && (
-          <p className="text-sm text-slate-500">Loading...</p>
-        )}
+        {isLoading && <TableSkeleton rows={4} cols={4} />}
         {listError && (
           <p className="text-sm text-red-600">{listError}</p>
         )}
 
-        {!isLoading && !listError && (
+        {!isLoading && !listError && users.length === 0 && (
+          <EmptyState icon={UsersIcon} title="No users yet" />
+        )}
+
+        {!isLoading && !listError && users.length > 0 && (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-xs uppercase tracking-wide text-slate-400">
-                <th className="pb-3 font-medium">Name</th>
-                <th className="pb-3 font-medium">Email</th>
-                <th className="pb-3 font-medium">Role</th>
-                <th className="pb-3 font-medium">Added</th>
+                <SortableHeader label="Name" field="name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Email" field="email" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Role" field="role" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Added" field="createdAt" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
               </tr>
             </thead>
             <tbody>

@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
+import { ClipboardList } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type PurchaseOrderStatus =
   | "DRAFT"
@@ -35,6 +40,8 @@ type LineForm = { itemId: string; quantityOrdered: string; unitPrice: string };
 const emptyLine = (): LineForm => ({ itemId: "", quantityOrdered: "1", unitPrice: "" });
 
 export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [items, setItems] = useState<Item[]>([]);
 
@@ -46,6 +53,8 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
     totalPages: 1,
   });
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("orderDate");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -82,15 +91,20 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function loadOrders(page = pagination.page, searchTerm = search) {
+  async function loadOrders(
+    page = pagination.page,
+    searchTerm = search,
+    sortField = sortBy,
+    sortDirection = sortDir
+  ) {
     setIsLoading(true);
     setListError(null);
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pagination.pageSize),
-        sortBy: "orderDate",
-        sortDir: "desc",
+        sortBy: sortField,
+        sortDir: sortDirection,
       });
       if (searchTerm) params.set("search", searchTerm);
 
@@ -113,6 +127,13 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
     loadOrders(1, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function handleSort(field: string) {
+    const nextDir = field === sortBy && sortDir === "asc" ? "desc" : "asc";
+    setSortBy(field);
+    setSortDir(nextDir);
+    loadOrders(1, search, field, nextDir);
+  }
 
   function updateLine(index: number, patch: Partial<LineForm>) {
     setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
@@ -160,6 +181,7 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
       setNotes("");
       setLines([emptyLine()]);
       await loadOrders(1);
+      toast.success(`Purchase order "${data.poNumber}" created`);
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -333,11 +355,21 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
         </div>
 
         <div className="px-6 py-4">
-          {isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+          {isLoading && <TableSkeleton rows={5} cols={6} />}
           {listError && <p className="text-sm text-red-600">{listError}</p>}
 
           {!isLoading && !listError && orders.length === 0 && (
-            <p className="text-sm text-slate-500">No purchase orders yet.</p>
+            <EmptyState
+              icon={ClipboardList}
+              title="No purchase orders found"
+              description={
+                search
+                  ? "Try a different search term."
+                  : canManage
+                    ? "Create your first purchase order above."
+                    : "Check back once a purchase order has been raised."
+              }
+            />
           )}
 
           {!isLoading && !listError && orders.length > 0 && (
@@ -345,11 +377,11 @@ export function PurchaseOrdersManager({ canManage }: { canManage: boolean }) {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-slate-400">
-                    <th className="pb-3 font-medium">PO number</th>
+                    <SortableHeader label="PO number" field="poNumber" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <th className="pb-3 font-medium">Supplier</th>
-                    <th className="pb-3 font-medium">Status</th>
+                    <SortableHeader label="Status" field="status" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <th className="pb-3 font-medium">Items</th>
-                    <th className="pb-3 font-medium">Order date</th>
+                    <SortableHeader label="Order date" field="orderDate" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <th className="pb-3 font-medium">Expected</th>
                   </tr>
                 </thead>

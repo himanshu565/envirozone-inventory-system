@@ -2,6 +2,8 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { TableSkeleton } from "@/components/ui/skeleton";
 
 type Organization = {
   name: string;
@@ -22,11 +24,12 @@ const emptyForm = {
 };
 
 export function OrganizationSettings() {
+  const toast = useToast();
+
   const [form, setForm] = useState(emptyForm);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [savedAt, setSavedAt] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [logoBroken, setLogoBroken] = useState(false);
 
@@ -67,7 +70,6 @@ export function OrganizationSettings() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
-    setSavedAt(null);
     setIsSubmitting(true);
 
     try {
@@ -85,7 +87,7 @@ export function OrganizationSettings() {
       }
 
       setLogoBroken(false);
-      setSavedAt(Date.now());
+      toast.success("Organization settings saved");
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -94,7 +96,11 @@ export function OrganizationSettings() {
   }
 
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Loading...</p>;
+    return (
+      <div className="max-w-2xl rounded-lg border border-slate-200 bg-white p-6">
+        <TableSkeleton rows={4} cols={2} />
+      </div>
+    );
   }
 
   return (
@@ -235,9 +241,6 @@ export function OrganizationSettings() {
           >
             {isSubmitting ? "Saving..." : "Save changes"}
           </button>
-          {savedAt && (
-            <span className="text-sm text-emerald-600">Saved</span>
-          )}
         </div>
       </form>
     </div>

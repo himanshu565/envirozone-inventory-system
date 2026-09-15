@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Package } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { useConfirm } from "@/components/ui/confirm-dialog-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type Category = {
   id: number;
@@ -35,6 +41,9 @@ const emptyItemForm = {
 };
 
 export function InventoryManager({ canManage }: { canManage: boolean }) {
+  const toast = useToast();
+  const confirm = useConfirm();
+
   const [categories, setCategories] = useState<Category[]>([]);
   const [categoryError, setCategoryError] = useState<string | null>(null);
   const [newCategoryName, setNewCategoryName] = useState("");
@@ -48,6 +57,8 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
     totalPages: 1,
   });
   const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [isLoadingItems, setIsLoadingItems] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
 
@@ -74,13 +85,20 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
     }
   }
 
-  async function loadItems(page = pagination.page, searchTerm = search) {
+  async function loadItems(
+    page = pagination.page,
+    searchTerm = search,
+    sortField = sortBy,
+    sortDirection = sortDir
+  ) {
     setIsLoadingItems(true);
     setListError(null);
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pagination.pageSize),
+        sortBy: sortField,
+        sortDir: sortDirection,
       });
       if (searchTerm) params.set("search", searchTerm);
 
@@ -104,6 +122,13 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function handleSort(field: string) {
+    const nextDir = field === sortBy && sortDir === "asc" ? "desc" : "asc";
+    setSortBy(field);
+    setSortDir(nextDir);
+    loadItems(1, search, field, nextDir);
+  }
+
   async function handleCreateCategory(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setCategoryError(null);
@@ -125,6 +150,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
 
       setNewCategoryName("");
       await loadCategories();
+      toast.success(`Category "${data.name}" added`);
     } catch {
       setCategoryError("Unable to reach the server");
     } finally {
@@ -185,8 +211,10 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
         return;
       }
 
+      const wasEditing = Boolean(editingId);
       cancelEdit();
       await loadItems();
+      toast.success(wasEditing ? `"${data.name}" updated` : `"${data.name}" added`);
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -195,7 +223,13 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
   }
 
   async function handleDelete(item: Item) {
-    if (!confirm(`Delete "${item.name}"? This cannot be undone.`)) return;
+    const confirmed = await confirm({
+      title: `Delete "${item.name}"?`,
+      description: "This cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    });
+    if (!confirmed) return;
 
     try {
       const response = await fetch(`${API_URL}/api/items/${item.id}`, {
@@ -204,12 +238,13 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
       });
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        setListError(data.error ?? "Unable to delete item");
+        toast.error(data.error ?? "Unable to delete item");
         return;
       }
       await loadItems();
+      toast.success(`"${item.name}" deleted`);
     } catch {
-      setListError("Unable to reach the server");
+      toast.error("Unable to reach the server");
     }
   }
 
@@ -441,9 +476,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
         </div>
 
         <div className="px-6 py-4">
-          {isLoadingItems && (
-            <p className="text-sm text-slate-500">Loading...</p>
-          )}
+          {isLoadingItems && <TableSkeleton rows={6} cols={canManage ? 7 : 6} />}
           {listError && (
             <p className="text-sm text-red-600">{listError}</p>
           )}
@@ -453,12 +486,12 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="text-xs uppercase tracking-wide text-slate-400">
-                    <th className="pb-3 font-medium">Code</th>
-                    <th className="pb-3 font-medium">Name</th>
+                    <SortableHeader label="Code" field="itemCode" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                    <SortableHeader label="Name" field="name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     <th className="pb-3 font-medium">Category</th>
                     <th className="pb-3 font-medium">Unit</th>
                     <th className="pb-3 font-medium">Current stock</th>
-                    <th className="pb-3 font-medium">Min. stock</th>
+                    <SortableHeader label="Min. stock" field="minimumStock" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                     {canManage && <th className="pb-3 font-medium">Actions</th>}
                   </tr>
                 </thead>
@@ -524,11 +557,18 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                   ))}
                   {items.length === 0 && (
                     <tr>
-                      <td
-                        colSpan={canManage ? 7 : 6}
-                        className="py-6 text-center text-slate-500"
-                      >
-                        No items found.
+                      <td colSpan={canManage ? 7 : 6}>
+                        <EmptyState
+                          icon={Package}
+                          title="No items found"
+                          description={
+                            search
+                              ? "Try a different search term."
+                              : canManage
+                                ? "Add your first item above to get started."
+                                : "Check back once inventory has been added."
+                          }
+                        />
                       </td>
                     </tr>
                   )}

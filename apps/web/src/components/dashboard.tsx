@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import type { Role } from "@envirozone/auth";
+import { TableSkeleton } from "@/components/ui/skeleton";
 
 type Category = { id: number; name: string };
 
@@ -188,7 +189,7 @@ export function Dashboard({ role }: { role: Role }) {
         </div>
 
         <div className="px-6 py-4">
-          {isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+          {isLoading && <TableSkeleton rows={3} cols={4} />}
 
           {!isLoading && !error && lowStockItems.length === 0 && (
             <p className="text-sm text-slate-500">
@@ -244,9 +245,7 @@ export function Dashboard({ role }: { role: Role }) {
         </div>
 
         <div className="px-6 py-4">
-          {isLoading && (
-            <p className="text-sm text-slate-500">Loading...</p>
-          )}
+          {isLoading && <TableSkeleton rows={3} cols={5} />}
 
           {!isLoading && recentItems.length === 0 && !error && (
             <p className="text-sm text-slate-500">

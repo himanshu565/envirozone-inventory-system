@@ -1,7 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Tags } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type CategorySummary = {
   categoryId: number;
@@ -55,13 +58,15 @@ export function CategoryStockSummary() {
       </div>
 
       <div className="px-6 py-4">
-        {isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+        {isLoading && <TableSkeleton rows={3} cols={3} />}
         {error && <p className="text-sm text-red-600">{error}</p>}
 
         {!isLoading && !error && summary.length === 0 && (
-          <p className="text-sm text-slate-500">
-            No categories yet — add items in Inventory first.
-          </p>
+          <EmptyState
+            icon={Tags}
+            title="No categories yet"
+            description="Add items in Inventory first."
+          />
         )}
 
         {!isLoading && !error && summary.length > 0 && (

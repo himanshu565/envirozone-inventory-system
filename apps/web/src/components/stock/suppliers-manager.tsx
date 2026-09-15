@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Truck } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type Supplier = {
   id: number;
@@ -22,9 +27,13 @@ export function SuppliersManager({
   canManage: boolean;
   onChange: () => void;
 }) {
+  const toast = useToast();
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "isActive">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
@@ -50,6 +59,18 @@ export function SuppliersManager({
     loadSuppliers();
   }, []);
 
+  function handleSort(field: string) {
+    if (field !== "name" && field !== "isActive") return;
+    setSortDir((prev) => (field === sortBy && prev === "asc" ? "desc" : "asc"));
+    setSortBy(field);
+  }
+
+  const sortedSuppliers = [...suppliers].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "isActive") return (Number(a.isActive) - Number(b.isActive)) * dir;
+    return a.name.localeCompare(b.name) * dir;
+  });
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
@@ -72,6 +93,7 @@ export function SuppliersManager({
       setForm(emptyForm);
       await loadSuppliers();
       onChange();
+      toast.success(`Supplier "${data.name}" added`);
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -90,8 +112,11 @@ export function SuppliersManager({
       if (!response.ok) throw new Error("Failed to update supplier");
       await loadSuppliers();
       onChange();
+      toast.success(
+        `Supplier "${supplier.name}" ${supplier.isActive ? "deactivated" : "activated"}`
+      );
     } catch {
-      setListError("Unable to update supplier");
+      toast.error("Unable to update supplier");
     }
   }
 
@@ -156,25 +181,25 @@ export function SuppliersManager({
 
         {formError && <p className="mb-2 text-sm text-red-600">{formError}</p>}
         {listError && <p className="mb-2 text-sm text-red-600">{listError}</p>}
-        {isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+        {isLoading && <TableSkeleton rows={3} cols={4} />}
 
-        {!isLoading && suppliers.length === 0 && (
-          <p className="text-sm text-slate-500">No suppliers yet.</p>
+        {!isLoading && !listError && suppliers.length === 0 && (
+          <EmptyState icon={Truck} title="No suppliers yet" />
         )}
 
         {!isLoading && suppliers.length > 0 && (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-xs uppercase tracking-wide text-slate-400">
-                <th className="pb-3 font-medium">Name</th>
+                <SortableHeader label="Name" field="name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 <th className="pb-3 font-medium">Contact</th>
                 <th className="pb-3 font-medium">Address</th>
-                <th className="pb-3 font-medium">Status</th>
+                <SortableHeader label="Status" field="isActive" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 {canManage && <th className="pb-3 font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {suppliers.map((supplier) => (
+              {sortedSuppliers.map((supplier) => (
                 <tr key={supplier.id} className="border-t border-slate-100">
                   <td className="py-3 font-medium text-slate-900">{supplier.name}</td>
                   <td className="py-3 text-slate-500">

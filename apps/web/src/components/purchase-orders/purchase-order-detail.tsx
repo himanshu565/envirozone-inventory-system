@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { StatusBadge } from "./purchase-orders-manager";
+import { useToast } from "@/components/ui/toast-provider";
+import { TableSkeleton } from "@/components/ui/skeleton";
 
 type PurchaseOrderStatus =
   | "DRAFT"
@@ -52,6 +54,8 @@ export function PurchaseOrderDetail({
   canManage: boolean;
   canReceiveStock: boolean;
 }) {
+  const toast = useToast();
+
   const [order, setOrder] = useState<PurchaseOrder | null>(null);
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -126,6 +130,7 @@ export function PurchaseOrderDetail({
 
       setReceiveQuantities({});
       await loadOrder();
+      toast.success("Receipt recorded");
     } catch {
       setReceiveError("Unable to reach the server");
     } finally {
@@ -149,6 +154,7 @@ export function PurchaseOrderDetail({
         return;
       }
       await loadOrder();
+      toast.success(`Status updated to ${status.replace("_", " ")}`);
     } catch {
       setStatusError("Unable to reach the server");
     } finally {
@@ -157,7 +163,11 @@ export function PurchaseOrderDetail({
   }
 
   if (isLoading) {
-    return <p className="text-sm text-slate-500">Loading...</p>;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white p-6">
+        <TableSkeleton rows={4} cols={4} />
+      </div>
+    );
   }
 
   if (error || !order) {

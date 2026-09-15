@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Building2 } from "lucide-react";
 import { API_URL } from "@/lib/api";
+import { useToast } from "@/components/ui/toast-provider";
+import { SortableHeader } from "@/components/ui/sortable-header";
+import { TableSkeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 
 type LocationType = "OFFICE" | "WAREHOUSE" | "SITE" | "OTHER";
 
@@ -24,9 +29,13 @@ export function LocationsManager({
   canManage: boolean;
   onChange: () => void;
 }) {
+  const toast = useToast();
+
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
+  const [sortBy, setSortBy] = useState<"name" | "type" | "isActive">("name");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [form, setForm] = useState(emptyForm);
   const [formError, setFormError] = useState<string | null>(null);
@@ -52,6 +61,19 @@ export function LocationsManager({
     loadLocations();
   }, []);
 
+  function handleSort(field: string) {
+    if (field !== "name" && field !== "type" && field !== "isActive") return;
+    setSortDir((prev) => (field === sortBy && prev === "asc" ? "desc" : "asc"));
+    setSortBy(field);
+  }
+
+  const sortedLocations = [...locations].sort((a, b) => {
+    const dir = sortDir === "asc" ? 1 : -1;
+    if (sortBy === "isActive") return (Number(a.isActive) - Number(b.isActive)) * dir;
+    if (sortBy === "type") return a.type.localeCompare(b.type) * dir;
+    return a.name.localeCompare(b.name) * dir;
+  });
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
@@ -74,6 +96,7 @@ export function LocationsManager({
       setForm(emptyForm);
       await loadLocations();
       onChange();
+      toast.success(`Location "${data.name}" added`);
     } catch {
       setFormError("Unable to reach the server");
     } finally {
@@ -92,8 +115,11 @@ export function LocationsManager({
       if (!response.ok) throw new Error("Failed to update location");
       await loadLocations();
       onChange();
+      toast.success(
+        `Location "${location.name}" ${location.isActive ? "deactivated" : "activated"}`
+      );
     } catch {
-      setListError("Unable to update location");
+      toast.error("Unable to update location");
     }
   }
 
@@ -148,25 +174,25 @@ export function LocationsManager({
 
         {formError && <p className="mb-2 text-sm text-red-600">{formError}</p>}
         {listError && <p className="mb-2 text-sm text-red-600">{listError}</p>}
-        {isLoading && <p className="text-sm text-slate-500">Loading...</p>}
+        {isLoading && <TableSkeleton rows={3} cols={4} />}
 
-        {!isLoading && locations.length === 0 && (
-          <p className="text-sm text-slate-500">No locations yet.</p>
+        {!isLoading && !listError && locations.length === 0 && (
+          <EmptyState icon={Building2} title="No locations yet" />
         )}
 
         {!isLoading && locations.length > 0 && (
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="text-xs uppercase tracking-wide text-slate-400">
-                <th className="pb-3 font-medium">Name</th>
-                <th className="pb-3 font-medium">Type</th>
+                <SortableHeader label="Name" field="name" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                <SortableHeader label="Type" field="type" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 <th className="pb-3 font-medium">Address</th>
-                <th className="pb-3 font-medium">Status</th>
+                <SortableHeader label="Status" field="isActive" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 {canManage && <th className="pb-3 font-medium">Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {locations.map((location) => (
+              {sortedLocations.map((location) => (
                 <tr key={location.id} className="border-t border-slate-100">
                   <td className="py-3 font-medium text-slate-900">{location.name}</td>
                   <td className="py-3 text-slate-500">{location.type}</td>

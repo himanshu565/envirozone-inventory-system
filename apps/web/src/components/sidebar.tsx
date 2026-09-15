@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Users as UsersIcon,
   Settings,
+  History,
 } from "lucide-react";
 import type { Role } from "@envirozone/auth";
 
@@ -23,6 +24,7 @@ const NAV_ITEMS: {
   { href: "/stock", label: "Stock", icon: Warehouse },
   { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
+  { href: "/audit-log", label: "Audit Log", icon: History, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
 ];
 

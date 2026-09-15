@@ -10,6 +10,7 @@ import locationsRoutes from "./routes/locations.routes";
 import stockRoutes from "./routes/stock.routes";
 import purchaseOrdersRoutes from "./routes/purchase-orders.routes";
 import organizationRoutes from "./routes/organization.routes";
+import auditLogsRoutes from "./routes/audit-logs.routes";
 
 export const app = express();
 
@@ -35,6 +36,7 @@ app.use("/api/locations", locationsRoutes);
 app.use("/api/stock", stockRoutes);
 app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/organization", organizationRoutes);
+app.use("/api/audit-logs", auditLogsRoutes);
 
 app.use(
   (

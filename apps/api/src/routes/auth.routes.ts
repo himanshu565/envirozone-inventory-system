@@ -7,8 +7,17 @@ import {
   createSessionToken,
 } from "@envirozone/auth";
 import { requireAuth } from "../middleware/auth.middleware";
+import { rateLimit } from "express-rate-limit";
 
 const router = Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: { error: "Too many login attempts. Please try again later." },
+});
 
 const cookieOptions = {
   httpOnly: true,
@@ -22,7 +31,7 @@ const cookieOptions = {
   domain: process.env.COOKIE_DOMAIN || undefined,
 };
 
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
   const email =
     typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
   const password = typeof req.body?.password === "string" ? req.body.password : "";

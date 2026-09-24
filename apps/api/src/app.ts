@@ -1,6 +1,9 @@
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import { randomUUID } from "node:crypto";
+import { prisma } from "./lib/db";
 import authRoutes from "./routes/auth.routes";
 import usersRoutes from "./routes/users.routes";
 import categoriesRoutes from "./routes/categories.routes";
@@ -14,17 +17,34 @@ import auditLogsRoutes from "./routes/audit-logs.routes";
 
 export const app = express();
 
+app.disable("x-powered-by");
+app.use(helmet());
+app.use((req, res, next) => {
+  const requestId = req.header("x-request-id") || randomUUID();
+  res.setHeader("x-request-id", requestId);
+  res.locals.requestId = requestId;
+  next();
+});
 app.use(
   cors({
     origin: process.env.WEB_ORIGIN ?? "http://localhost:3000",
     credentials: true,
   })
 );
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get("/health/ready", async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ ok: true, checks: { database: "ok" } });
+  } catch {
+    res.status(503).json({ ok: false, checks: { database: "unavailable" } });
+  }
 });
 
 app.use("/api/auth", authRoutes);
@@ -51,7 +71,7 @@ app.use(
       return;
     }
 
-    console.error(err);
+    console.error({ err, requestId: res.locals.requestId }, "Unhandled API error");
     res.status(500).json({ error: "Internal server error" });
   }
 );

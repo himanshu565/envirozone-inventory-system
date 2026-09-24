@@ -81,8 +81,9 @@ npm run start:web    # next start, reads PORT (Next's own default 3000)
 deployments will instead point each service's own start command — `npm run start -w
 apps/api` / `npm run start -w apps/web` — directly at that service.)
 
-Confirm the API is alive via `GET /health` (returns `{ "ok": true }`) — most platforms
-want a health-check endpoint to wire up, and this is it.
+Confirm the API is alive via `GET /health` (liveness) and ready via `GET /health/ready`
+(liveness plus a database connectivity check). Use `/health/ready` for platform traffic
+gating so an API process is not sent requests while its database is unavailable.
 
 ## 6. Production checklist
 
@@ -96,6 +97,9 @@ want a health-check endpoint to wire up, and this is it.
       default (see §4).
 - [ ] HTTPS is terminated somewhere in front of both services (a platform's default,
       a load balancer, or a reverse proxy) — the app itself doesn't terminate TLS.
+- [ ] The platform uses `GET /health` for liveness and `GET /health/ready` for readiness.
+- [ ] The API's login rate limit is compatible with the deployment's NAT/proxy setup;
+      configure trusted proxy handling at the edge if many users share one public IP.
 
 ## 7. Known gaps worth knowing before you ship
 

@@ -107,8 +107,20 @@ export function Dashboard({ role }: { role: Role }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-end">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#a56b35]">
+            Inventory pulse
+          </p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-[#26352d]">
+            Good morning, keep things moving.
+          </h2>
+        </div>
+        <p className="text-sm text-[#778177]">A quick view of today&apos;s operations</p>
+      </div>
+
       {error && (
-        <p className="text-sm text-red-600">{error}</p>
+        <p className="rounded-lg border border-[#edc7bd] bg-[#fff5f1] px-4 py-3 text-sm text-[#a9442f]">{error}</p>
       )}
 
       <div
@@ -176,12 +188,12 @@ export function Dashboard({ role }: { role: Role }) {
         )}
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">Low stock alerts</h2>
+      <div className="rounded-xl border border-[#eadfce] bg-[#fffdf8] shadow-[0_5px_18px_rgba(82,67,45,0.04)]">
+        <div className="flex items-center justify-between border-b border-[#eee5d8] px-6 py-4">
+          <h2 className="text-sm font-semibold text-[#26352d]">Low stock alerts</h2>
           <Link
             href="/inventory"
-            className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500"
+            className="flex items-center gap-1 text-sm font-medium text-[#a56b35] hover:text-[#7e4e25]"
           >
             View inventory
             <ArrowRight className="h-3.5 w-3.5" />
@@ -210,15 +222,15 @@ export function Dashboard({ role }: { role: Role }) {
               <tbody>
                 {lowStockItems.map((item) => (
                   <tr key={item.id} className="border-t border-slate-100">
-                    <td className="py-3 font-medium text-slate-900">
+                    <td className="py-3 font-medium text-[#26352d]">
                       {item.itemCode} — {item.name}
                     </td>
                     <td className="py-3">
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                      <span className="rounded-full bg-[#e7eee9] px-2.5 py-0.5 text-xs font-medium text-[#316b58]">
                         {item.category.name}
                       </span>
                     </td>
-                    <td className="py-3 font-semibold tabular-nums text-red-600">
+                    <td className="py-3 font-semibold tabular-nums text-[#b94b32]">
                       {item.currentStock}
                     </td>
                     <td className="py-3 text-slate-500">{item.minimumStock}</td>
@@ -230,14 +242,14 @@ export function Dashboard({ role }: { role: Role }) {
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-sm font-semibold text-slate-900">
+      <div className="rounded-xl border border-[#eadfce] bg-[#fffdf8] shadow-[0_5px_18px_rgba(82,67,45,0.04)]">
+        <div className="flex items-center justify-between border-b border-[#eee5d8] px-6 py-4">
+          <h2 className="text-sm font-semibold text-[#26352d]">
             Recently added items
           </h2>
           <Link
             href="/inventory"
-            className="flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-500"
+            className="flex items-center gap-1 text-sm font-medium text-[#a56b35] hover:text-[#7e4e25]"
           >
             View all
             <ArrowRight className="h-3.5 w-3.5" />
@@ -280,19 +292,19 @@ export function Dashboard({ role }: { role: Role }) {
                     <td className="py-3 font-mono text-xs text-slate-500">
                       {item.itemCode}
                     </td>
-                    <td className="py-3 font-medium text-slate-900">
+                    <td className="py-3 font-medium text-[#26352d]">
                       {item.name}
                     </td>
                     <td className="py-3">
-                      <span className="rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                      <span className="rounded-full bg-[#e7eee9] px-2.5 py-0.5 text-xs font-medium text-[#316b58]">
                         {item.category.name}
                       </span>
                     </td>
                     <td
                       className={`py-3 font-semibold tabular-nums ${
                         item.currentStock < item.minimumStock
-                          ? "text-red-600"
-                          : "text-slate-900"
+                          ? "text-[#b94b32]"
+                          : "text-[#26352d]"
                       }`}
                     >
                       {item.currentStock}
@@ -312,10 +324,10 @@ export function Dashboard({ role }: { role: Role }) {
 }
 
 const ACCENTS = {
-  blue: "bg-blue-50 text-blue-600",
-  emerald: "bg-emerald-50 text-emerald-600",
-  sky: "bg-sky-50 text-sky-600",
-  amber: "bg-amber-50 text-amber-600",
+  blue: "bg-[#e7eee9] text-[#316b58]",
+  emerald: "bg-[#f6e7c8] text-[#a56b35]",
+  sky: "bg-[#f1ddd5] text-[#b0523d]",
+  amber: "bg-[#f4e4a9] text-[#8b6b18]",
 } as const;
 
 function StatCard({
@@ -336,20 +348,21 @@ function StatCard({
   const emphasize = emphasizeWhenPositive && !isLoading && (value ?? 0) > 0;
 
   return (
-    <div className="flex items-start justify-between rounded-lg border border-slate-200 bg-white p-5">
+    <div className="group relative flex min-h-32 items-start justify-between overflow-hidden rounded-xl border border-[#eadfce] bg-[#fffdf8] p-5 shadow-[0_5px_18px_rgba(82,67,45,0.04)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(82,67,45,0.09)]">
+      <span className="absolute -right-5 -top-6 h-20 w-20 rounded-full border-10 border-current opacity-10" />
       <div>
-        <p className="text-sm font-medium text-slate-500">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#7b8177]">
           {label}
         </p>
         <p
-          className={`mt-2 text-3xl font-semibold tabular-nums ${
-            emphasize ? "text-red-600" : "text-slate-900"
+          className={`mt-3 text-3xl font-semibold tabular-nums tracking-tight ${
+            emphasize ? "text-[#b94b32]" : "text-[#26352d]"
           }`}
         >
           {isLoading || value === null ? "—" : value}
         </p>
       </div>
-      <span className={`flex h-10 w-10 items-center justify-center rounded-lg ${ACCENTS[accent]}`}>
+      <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${ACCENTS[accent]}`}>
         <Icon className="h-5 w-5" />
       </span>
     </div>
@@ -357,13 +370,13 @@ function StatCard({
 }
 
 const ACTION_TILE_HOVER = {
-  blue: "hover:border-blue-300",
-  emerald: "hover:border-emerald-300",
+  blue: "hover:border-[#9bbbab]",
+  emerald: "hover:border-[#dcb477]",
 } as const;
 
 const ACTION_TILE_ARROW = {
-  blue: "group-hover:text-blue-500",
-  emerald: "group-hover:text-emerald-500",
+  blue: "group-hover:text-[#316b58]",
+  emerald: "group-hover:text-[#a56b35]",
 } as const;
 
 function ActionTile({
@@ -382,16 +395,16 @@ function ActionTile({
   return (
     <Link
       href={href}
-      className={`group flex items-center gap-4 rounded-lg border border-slate-200 bg-white p-5 transition hover:shadow-sm ${ACTION_TILE_HOVER[accent]}`}
+      className={`group flex items-center gap-4 rounded-xl border border-[#eadfce] bg-[#fffdf8] p-5 shadow-[0_5px_18px_rgba(82,67,45,0.035)] transition duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_24px_rgba(82,67,45,0.08)] ${ACTION_TILE_HOVER[accent]}`}
     >
-      <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${ACCENTS[accent]}`}>
+      <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${ACCENTS[accent]}`}>
         <Icon className="h-5 w-5" />
       </span>
       <div className="flex-1">
-        <p className="text-sm font-semibold text-slate-900">
+        <p className="text-sm font-semibold text-[#26352d]">
           {title}
         </p>
-        <p className="text-sm text-slate-500">{description}</p>
+        <p className="text-sm text-[#778177]">{description}</p>
       </div>
       <ArrowUpRight className={`h-4 w-4 shrink-0 text-slate-400 transition ${ACTION_TILE_ARROW[accent]}`} />
     </Link>

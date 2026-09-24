@@ -41,21 +41,23 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex flex-1 items-center justify-center bg-slate-50 px-4">
+    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-[#f5f1e8] px-4">
+      <div className="absolute -left-24 -top-24 h-72 w-72 rounded-full border-32 border-[#e4c58e]/30" />
+      <div className="absolute -bottom-32 -right-24 h-80 w-80 rounded-full bg-[#dbe8df]/70" />
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm"
+        className="relative w-full max-w-sm rounded-2xl border border-[#e6d8c5] bg-[#fffdf8] p-8 shadow-[0_18px_50px_rgba(82,67,45,0.12)]"
       >
         <div className="mb-6 flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-md bg-linear-to-br from-emerald-400 to-blue-500 text-sm font-bold text-white">
+          <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#d89b37] text-sm font-bold text-[#0f3d35]">
             E
           </span>
           <div>
-            <p className="text-sm font-semibold text-slate-900">
+            <p className="text-sm font-semibold text-[#26352d]">
               Envirostore
             </p>
-            <p className="text-xs text-slate-500">
-              Sign in to your account
+            <p className="text-xs text-[#778177]">
+              Your inventory workspace
             </p>
           </div>
         </div>
@@ -95,7 +97,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full rounded-md bg-blue-600 py-2 text-sm font-medium text-white transition hover:bg-blue-500 disabled:opacity-50"
+          className="w-full rounded-lg bg-[#316b58] py-2.5 text-sm font-medium text-white transition hover:bg-[#255847] disabled:opacity-50"
         >
           {isSubmitting ? "Signing in..." : "Sign in"}
         </button>

@@ -3,6 +3,7 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { prisma } from "./lib/db";
 import authRoutes from "./routes/auth.routes";
 import usersRoutes from "./routes/users.routes";
@@ -61,17 +62,41 @@ app.use("/api/audit-logs", auditLogsRoutes);
 app.use(
   (
     err: unknown,
-    _req: express.Request,
+    req: express.Request,
     res: express.Response,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _next: express.NextFunction
+    next: express.NextFunction
   ) => {
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+
     if (err instanceof SyntaxError && "body" in err) {
       res.status(400).json({ error: "Invalid JSON body" });
       return;
     }
 
-    console.error({ err, requestId: res.locals.requestId }, "Unhandled API error");
+    if (err instanceof Prisma.PrismaClientKnownRequestError) {
+      if (err.code === "P2002") {
+        res.status(409).json({ error: "A record with these values already exists" });
+        return;
+      }
+
+      if (err.code === "P2025") {
+        res.status(404).json({ error: "The requested record was not found" });
+        return;
+      }
+    }
+
+    console.error(
+      {
+        err,
+        method: req.method,
+        path: req.originalUrl,
+        requestId: res.locals.requestId,
+      },
+      "Unhandled API error"
+    );
     res.status(500).json({ error: "Internal server error" });
   }
 );

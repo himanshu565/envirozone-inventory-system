@@ -1,31 +1,9 @@
-version: '3.8'
-services:
-  db:
-    image: postgres:latest
-    container_name: envirostore-db
-    environment:
-      POSTGRES_USER: envirostore
-      POSTGRES_DB: envirostore
-      POSTGRES_PASSWORD: yourpassword
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: pg_isready -U envirostore -d envirostore
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    ports:
-      - "5432:5432"
-  redis:
-    image: redis:alpine
-    container_name: envirostore-redis
-    depends_on:
-      - db
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-
 volumes:
-  postgres_data:
-  redis_data:
+  - type: bind
+    source: ./data
+    target: /app/data
+
+networks:
+  app-network:
+    driver: bridge
+    internal: true

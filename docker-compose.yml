@@ -1,21 +1,31 @@
+version: '3.8'
 services:
   db:
-    image: postgres:17-alpine
-    restart: unless-stopped
+    image: postgres:latest
+    container_name: envirostore-db
     environment:
       POSTGRES_USER: envirostore
-      POSTGRES_PASSWORD: envirostore
       POSTGRES_DB: envirostore
-    ports:
-      - "5433:5432"
+      POSTGRES_PASSWORD: yourpassword
     volumes:
-      - envirostore_pgdata:/var/lib/postgresql/data
-
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U envirostore -d envirostore
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    ports:
+      - "5432:5432"
   redis:
-    image: redis:7-alpine
-    restart: unless-stopped
+    image: redis:alpine
+    container_name: envirostore-redis
+    depends_on:
+      - db
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
 
 volumes:
-  envirostore_pgdata:
+  postgres_data:
+  redis_data:

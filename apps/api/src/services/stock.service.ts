@@ -1,4 +1,5 @@
 import { prisma } from "../lib/db";
+import { getSignedStockDelta } from "./stock-ledger";
 
 export async function getCurrentStockByItemIds(
   itemIds: number[]
@@ -19,7 +20,7 @@ export async function getCurrentStockByItemIds(
     // INWARD and OUTWARD quantities are always entered positive, so the type
     // decides the sign. ADJUSTMENT quantities carry their own sign (a
     // negative adjustment corrects stock down, a positive one corrects it up).
-    const delta = row.type === "INWARD" ? sum : row.type === "OUTWARD" ? -sum : sum;
+    const delta = getSignedStockDelta(row.type, sum);
     stock.set(row.itemId, (stock.get(row.itemId) ?? 0) + delta);
   }
 

@@ -2,8 +2,13 @@ import { Router } from "express";
 import { Prisma, type TransactionType } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth, requireAction } from "../middleware/auth.middleware";
-import { recordAudit } from "../services/audit.service";
 import { getCategoryStockSummary } from "../services/stock.service";
+import {
+  assertNonNegativeStock,
+  calculateCurrentStock,
+  getSignedStockDelta,
+  InsufficientStockError,
+} from "../services/stock-ledger";
 import {
   parseListQuery,
   toPrismaPagination,
@@ -122,36 +127,84 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
   const remarks =
     typeof req.body?.remarks === "string" ? req.body.remarks.trim() || null : null;
 
-  const transaction = await prisma.stockTransaction.create({
-    data: {
-      type: type as TransactionType,
-      quantity,
-      itemId,
-      supplierId,
-      fromLocationId,
-      toLocationId,
-      referenceNumber,
-      remarks,
-      createdById: req.session!.userId,
-    },
-    include: TRANSACTION_INCLUDE,
-  });
+    let transaction:
+    | Prisma.StockTransactionGetPayload<{ include: typeof TRANSACTION_INCLUDE }>
+    | undefined;
 
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "stock.transaction.create",
-    entityType: "StockTransaction",
-    entityId: transaction.id,
-    after: {
-      id: transaction.id,
-      type: transaction.type,
-      quantity: transaction.quantity,
-      itemId: transaction.itemId,
-      supplierId: transaction.supplierId,
-      fromLocationId: transaction.fromLocationId,
-      toLocationId: transaction.toLocationId,
-    },
-  });
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      transaction = await prisma.$transaction(
+        async (tx) => {
+          const stockTotals = await tx.stockTransaction.groupBy({
+            by: ["type"],
+            where: { itemId },
+            _sum: { quantity: true },
+          });
+          const currentStock = calculateCurrentStock(stockTotals);
+          const stockDelta = getSignedStockDelta(type as TransactionType, quantity);
+          assertNonNegativeStock(currentStock, stockDelta);
+
+          const created = await tx.stockTransaction.create({
+            data: {
+              type: type as TransactionType,
+              quantity,
+              itemId,
+              supplierId,
+              fromLocationId,
+              toLocationId,
+              referenceNumber,
+              remarks,
+              createdById: req.session!.userId,
+            },
+            include: TRANSACTION_INCLUDE,
+          });
+
+          // Keep the audit record atomic with the stock transaction.
+          await tx.auditLog.create({
+            data: {
+              actorId: req.session!.userId,
+              action: "stock.transaction.create",
+              entityType: "StockTransaction",
+              entityId: created.id,
+              after: {
+                id: created.id,
+                type: created.type,
+                quantity: created.quantity,
+                itemId: created.itemId,
+                supplierId: created.supplierId,
+                fromLocationId: created.fromLocationId,
+                toLocationId: created.toLocationId,
+              },
+            },
+          });
+
+          return created;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+      break;
+    } catch (error) {
+      if (error instanceof InsufficientStockError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+
+      const isSerializationConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+      if (isSerializationConflict && attempt < 2) continue;
+      if (isSerializationConflict) {
+        res.status(409).json({
+          error: "Stock changed concurrently. Please retry the transaction.",
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  if (!transaction) {
+    throw new Error("Stock transaction completed without a result");
+  }
 
   res.status(201).json(transaction);
 });

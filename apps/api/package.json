@@ -6,6 +6,7 @@
     "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc",
+    "test:stock-ledger": "node --import tsx --test test/stock-ledger.test.ts",
     "start": "node dist/server.js",
     "seed": "tsx src/prisma/seed.ts",
     "migrate:deploy": "prisma migrate deploy"

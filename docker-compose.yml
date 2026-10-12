@@ -1,9 +1,37 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: envirozone
+      POSTGRES_PASSWORD: envirozone_dev
+      POSTGRES_DB: envirostore
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U envirozone -d envirostore"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - app-network
+
 volumes:
-  - type: bind
-    source: ./data
-    target: /app/data
+  postgres-data:
 
 networks:
   app-network:
     driver: bridge
-    internal: true

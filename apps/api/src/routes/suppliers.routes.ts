@@ -51,22 +51,28 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
     return;
   }
 
-  const supplier = await prisma.supplier.create({
-    data: {
-      name,
-      contactPerson: optionalString(req.body?.contactPerson),
-      phone: optionalString(req.body?.phone),
-      email: optionalString(req.body?.email),
-      address: optionalString(req.body?.address),
-    },
-  });
+  const supplier = await prisma.$transaction(async (tx) => {
+    const created = await tx.supplier.create({
+      data: {
+        name,
+        contactPerson: optionalString(req.body?.contactPerson),
+        phone: optionalString(req.body?.phone),
+        email: optionalString(req.body?.email),
+        address: optionalString(req.body?.address),
+      },
+    });
 
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "supplier.create",
-    entityType: "Supplier",
-    entityId: supplier.id,
-    after: supplierSnapshot(supplier),
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "supplier.create",
+        entityType: "Supplier",
+        entityId: created.id,
+        after: supplierSnapshot(created),
+      },
+      tx
+    );
+    return created;
   });
 
   res.status(201).json(supplier);
@@ -113,15 +119,20 @@ router.patch("/:id", requireAction("manageMasterData"), async (req, res) => {
     data.isActive = req.body.isActive;
   }
 
-  const supplier = await prisma.supplier.update({ where: { id }, data });
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "supplier.update",
-    entityType: "Supplier",
-    entityId: supplier.id,
-    before: supplierSnapshot(before),
-    after: supplierSnapshot(supplier),
+  const supplier = await prisma.$transaction(async (tx) => {
+    const updated = await tx.supplier.update({ where: { id }, data });
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "supplier.update",
+        entityType: "Supplier",
+        entityId: updated.id,
+        before: supplierSnapshot(before),
+        after: supplierSnapshot(updated),
+      },
+      tx
+    );
+    return updated;
   });
 
   res.json(supplier);

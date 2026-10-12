@@ -58,6 +58,20 @@ migrations are skipped). Do not use `prisma db push` in any real environment —
 [PROJECT_GUIDE.md §3.4](./PROJECT_GUIDE.md#34-migrations--the-history-of-the-schema-not-just-its-current-shape)
 for why.
 
+The `20261012141000_add_purchase_order_receipt_idempotency` migration is also additive. It
+creates an empty table for durable receipt request keys, requires no backfill, and does not
+alter existing purchase orders or stock transactions. Apply it before deploying the receipt
+endpoint version that accepts keyed retries; review and test the SQL in a disposable or
+staging database before applying it to a non-disposable environment.
+
+The `20261012134712_add_stock_transaction_idempotency` migration is additive: it creates an
+empty table and indexes for keyed stock-request results. It does not backfill existing
+`StockTransaction` rows, and requests without `Idempotency-Key` continue to work without
+creating records in that table. Apply the migration before deploying the API version that
+accepts keyed requests. Review the generated SQL and schedule the deployment like other
+DDL changes; do not apply it to a non-disposable database from a development shell or test
+command. Existing production data does not need a backfill.
+
 ## 4. Seed the first admin account (first deploy only)
 
 ```bash
@@ -101,14 +115,53 @@ gating so an API process is not sent requests while its database is unavailable.
 - [ ] The API's login rate limit is compatible with the deployment's NAT/proxy setup;
       configure trusted proxy handling at the edge if many users share one public IP.
 
-## 7. Known gaps worth knowing before you ship
+## 7. CI and operational verification
+
+The repository workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
+runs `npm ci`, Prisma validation, API type checking, the web lint script, focused
+unit tests, guarded integration suites, and the full build. Integration suites
+skip unless a safe disposable PostgreSQL URL is supplied; they must not be
+pointed at a development or production database.
+
+The API readiness endpoint checks PostgreSQL. Redis is present only as optional
+local infrastructure and is not used by the application, so readiness does not
+claim Redis health.
+
+Before applying migrations to a valuable database:
+
+1. Take a PostgreSQL backup using the hosting provider's supported mechanism.
+2. Restore it into a separate disposable database.
+3. Run `npm run migrate:deploy` against the restored copy.
+4. Run the relevant integration tests and representative read/write smoke tests.
+5. Keep the original backup and record the restore owner and recovery window.
+
+## 8. Known gaps worth knowing before you ship
 
 These are real, not oversights — see
 [PROJECT_GUIDE.md §10](./PROJECT_GUIDE.md#10-whats-deliberately-missing) for the fuller
 list, but the two most relevant to a first deployment:
 
-- **No rate limiting on `/api/auth/login`.** Nothing currently throttles repeated
-  login attempts — worth adding before exposing this publicly.
-- **No automated tests or CI.** Every change to this codebase so far has been verified
-  manually (typecheck, lint, and a real browser session). There's no pipeline that
-  re-runs those checks on push.
+- **No Redis-backed feature currently exists.** The local Redis container is reserved
+  for a future measured need such as caching or distributed rate limiting.
+- **The web lint baseline currently contains existing hook-rule failures.** CI
+  intentionally reports this rather than hiding it; resolve those lint findings
+  before treating the workflow as green.
+## Location stock migration
+
+`20261012150000_add_location_stock_balances` is additive and creates the
+`LocationStockBalance` table plus the `TRANSFER` ledger enum value. It does not
+backfill historical rows. Transactions with explicit locations may be reconciled
+later; rows with missing locations must remain unallocated until a business owner
+provides a mapping. No existing database should receive this migration until:
+
+1. A reviewed backup has completed and restore has been verified.
+2. A rollback/recovery owner and maintenance window are recorded.
+3. A dry-run reconciliation confirms item totals and identifies historical rows
+   that cannot be allocated safely.
+4. The release has been tested against a disposable PostgreSQL database.
+
+The rollback plan is restore-first: stop writers, preserve the post-migration
+ledger for investigation, restore the pre-migration backup if recovery is
+required, and do not attempt to recreate the dropped PostgreSQL enum manually.
+The new application must not be deployed before the migration is complete because
+it writes `TRANSFER` rows and location balances.

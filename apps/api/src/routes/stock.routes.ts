@@ -4,10 +4,11 @@ import { prisma } from "../lib/db";
 import { requireAuth, requireAction } from "../middleware/auth.middleware";
 import { getCategoryStockSummary } from "../services/stock.service";
 import {
-  assertNonNegativeStock,
+  assertStockChangeAllowed,
   calculateCurrentStock,
-  getSignedStockDelta,
   InsufficientStockError,
+  InvalidStockQuantityError,
+  validateStockQuantity,
 } from "../services/stock-ledger";
 import {
   parseListQuery,
@@ -15,10 +16,25 @@ import {
   toPrismaOrderBy,
   toPaginationMeta,
 } from "../lib/list-query";
+import {
+  hashStockTransactionRequest,
+  InvalidIdempotencyKeyError,
+  parseIdempotencyKey,
+  STOCK_TRANSACTION_OPERATION,
+} from "../services/stock-idempotency.service";
+import {
+  applyLocationStockChanges,
+  getLocationChanges,
+} from "../services/location-stock.service";
 
 const router = Router();
 
-const TRANSACTION_TYPES: TransactionType[] = ["INWARD", "OUTWARD", "ADJUSTMENT"];
+const TRANSACTION_TYPES: TransactionType[] = [
+  "INWARD",
+  "OUTWARD",
+  "ADJUSTMENT",
+  "TRANSFER",
+];
 const ALLOWED_SORT_FIELDS = ["transactionDate", "createdAt"];
 
 const TRANSACTION_INCLUDE = {
@@ -39,6 +55,24 @@ router.use(requireAuth);
 router.get("/summary", async (_req, res) => {
   const summary = await getCategoryStockSummary();
   res.json(summary);
+});
+
+router.get("/balances", async (req, res) => {
+  const itemId = req.query.itemId === undefined ? undefined : Number(req.query.itemId);
+  if (itemId !== undefined && !Number.isInteger(itemId)) {
+    res.status(400).json({ error: "Invalid item id" });
+    return;
+  }
+
+  const balances = await prisma.locationStockBalance.findMany({
+    where: itemId === undefined ? undefined : { itemId },
+    include: {
+      item: { select: { id: true, itemCode: true, name: true } },
+      location: { select: { id: true, name: true, isActive: true } },
+    },
+    orderBy: [{ itemId: "asc" }, { locationId: "asc" }],
+  });
+  res.json(balances);
 });
 
 router.get("/transactions", async (req, res) => {
@@ -65,6 +99,17 @@ router.get("/transactions", async (req, res) => {
 });
 
 router.post("/transactions", requireAction("manageStock"), async (req, res) => {
+  let idempotencyKey: string | null;
+  try {
+    idempotencyKey = parseIdempotencyKey(req.header("Idempotency-Key"));
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+
   const type = typeof req.body?.type === "string" ? req.body.type : "";
   if (!TRANSACTION_TYPES.includes(type as TransactionType)) {
     res.status(400).json({ error: `Type must be one of: ${TRANSACTION_TYPES.join(", ")}` });
@@ -78,15 +123,14 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
   }
 
   const quantity = Number(req.body?.quantity);
-  if (!Number.isInteger(quantity) || quantity === 0) {
-    res.status(400).json({ error: "Quantity must be a non-zero whole number" });
-    return;
-  }
-  if (type !== "ADJUSTMENT" && quantity < 0) {
-    res
-      .status(400)
-      .json({ error: "Quantity must be positive for inward/outward movements" });
-    return;
+  try {
+    validateStockQuantity(type as TransactionType, quantity);
+  } catch (error) {
+    if (error instanceof InvalidStockQuantityError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
   }
 
   const item = await prisma.item.findUnique({ where: { id: itemId } });
@@ -126,10 +170,38 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
       : null;
   const remarks =
     typeof req.body?.remarks === "string" ? req.body.remarks.trim() || null : null;
+  const requestHash = idempotencyKey
+    ? hashStockTransactionRequest({
+        type: type as TransactionType,
+        itemId,
+        quantity,
+        supplierId,
+        fromLocationId,
+        toLocationId,
+        referenceNumber,
+        remarks,
+      })
+    : null;
+  let locationChanges: ReturnType<typeof getLocationChanges>;
+  try {
+    locationChanges = getLocationChanges(
+      type as TransactionType,
+      quantity,
+      fromLocationId,
+      toLocationId
+    );
+  } catch (error) {
+    if (error instanceof Error) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
 
-    let transaction:
+  let transaction:
     | Prisma.StockTransactionGetPayload<{ include: typeof TRANSACTION_INCLUDE }>
     | undefined;
+  let replayed = false;
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -141,8 +213,10 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
             _sum: { quantity: true },
           });
           const currentStock = calculateCurrentStock(stockTotals);
-          const stockDelta = getSignedStockDelta(type as TransactionType, quantity);
-          assertNonNegativeStock(currentStock, stockDelta);
+          assertStockChangeAllowed(currentStock, type as TransactionType, quantity);
+          if (locationChanges.length > 0) {
+            await applyLocationStockChanges(tx, itemId, locationChanges);
+          }
 
           const created = await tx.stockTransaction.create({
             data: {
@@ -178,6 +252,18 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
             },
           });
 
+          if (idempotencyKey && requestHash) {
+            await tx.stockTransactionIdempotencyKey.create({
+              data: {
+                key: idempotencyKey,
+                operation: STOCK_TRANSACTION_OPERATION,
+                requestHash,
+                actorId: req.session!.userId,
+                stockTransactionId: created.id,
+              },
+            });
+          }
+
           return created;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
@@ -198,6 +284,37 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
         });
         return;
       }
+
+      if (
+        idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const existing = await prisma.stockTransactionIdempotencyKey.findUnique({
+          where: {
+            actorId_operation_key: {
+              actorId: req.session!.userId,
+              operation: STOCK_TRANSACTION_OPERATION,
+              key: idempotencyKey,
+            },
+          },
+          include: {
+            stockTransaction: { include: TRANSACTION_INCLUDE },
+          },
+        });
+
+        if (!existing) throw error;
+        if (existing.requestHash !== requestHash) {
+          res.status(409).json({
+            error: "Idempotency-Key was already used with a different request",
+          });
+          return;
+        }
+
+        transaction = existing.stockTransaction;
+        replayed = true;
+        break;
+      }
       throw error;
     }
   }
@@ -206,7 +323,7 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
     throw new Error("Stock transaction completed without a result");
   }
 
-  res.status(201).json(transaction);
+  res.status(replayed ? 200 : 201).json(transaction);
 });
 
 export default router;

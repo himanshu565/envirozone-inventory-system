@@ -9,6 +9,27 @@ import {
   toPrismaOrderBy,
   toPaginationMeta,
 } from "../lib/list-query";
+import {
+  assertStockChangeAllowed,
+  InsufficientStockError,
+  calculateCurrentStock,
+  InvalidStockQuantityError,
+  validateStockQuantity,
+} from "../services/stock-ledger";
+import {
+  hashReceiptRequest,
+  assertReceiptState,
+  getReceiptStatus,
+  InvalidReceiptStateError,
+  isAllowedPurchaseOrderTransition,
+  ReceiptIdempotencyConflictError,
+  PURCHASE_ORDER_RECEIVE_OPERATION,
+} from "../services/purchase-order-receiving.service";
+import {
+  InvalidIdempotencyKeyError,
+  parseIdempotencyKey,
+} from "../services/stock-idempotency.service";
+import { applyLocationStockChanges } from "../services/location-stock.service";
 
 const router = Router();
 
@@ -39,6 +60,8 @@ function parseOptionalId(value: unknown): number | null {
   if (value === undefined || value === null || value === "") return null;
   return Number(value);
 }
+
+class InvalidReceiptError extends Error {}
 
 async function generatePoNumber(): Promise<string> {
   const count = await prisma.purchaseOrder.count();
@@ -153,16 +176,34 @@ router.post("/", requireAction("managePurchaseOrders"), async (req, res) => {
   for (let attempt = 0; attempt < 3; attempt++) {
     const poNumber = await generatePoNumber();
     try {
-      order = await prisma.purchaseOrder.create({
-        data: {
-          poNumber,
-          supplierId,
-          expectedDate,
-          notes,
-          createdById: req.session!.userId,
-          items: { create: items },
-        },
-        include: DETAIL_INCLUDE,
+      order = await prisma.$transaction(async (tx) => {
+        const created = await tx.purchaseOrder.create({
+          data: {
+            poNumber,
+            supplierId,
+            expectedDate,
+            notes,
+            createdById: req.session!.userId,
+            items: { create: items },
+          },
+          include: DETAIL_INCLUDE,
+        });
+        await recordAudit(
+          {
+            actorId: req.session!.userId,
+            action: "purchaseOrder.create",
+            entityType: "PurchaseOrder",
+            entityId: created.id,
+            after: {
+              id: created.id,
+              poNumber: created.poNumber,
+              supplierId: created.supplierId,
+              itemCount: items.length,
+            },
+          },
+          tx
+        );
+        return created;
       });
       break;
     } catch (err) {
@@ -180,19 +221,6 @@ router.post("/", requireAction("managePurchaseOrders"), async (req, res) => {
   if (!order) {
     throw lastError;
   }
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "purchaseOrder.create",
-    entityType: "PurchaseOrder",
-    entityId: order.id,
-    after: {
-      id: order.id,
-      poNumber: order.poNumber,
-      supplierId: order.supplierId,
-      itemCount: items.length,
-    },
-  });
 
   res.status(201).json(order);
 });
@@ -217,6 +245,17 @@ router.patch("/:id", requireAction("managePurchaseOrders"), async (req, res) => 
       res.status(400).json({ error: `Status must be one of: ${PO_STATUSES.join(", ")}` });
       return;
     }
+    if (
+      !isAllowedPurchaseOrderTransition(
+        before.status,
+        req.body.status as PurchaseOrderStatus
+      )
+    ) {
+      res.status(409).json({
+        error: `Purchase order cannot transition from ${before.status} to ${req.body.status}`,
+      });
+      return;
+    }
     data.status = req.body.status as PurchaseOrderStatus;
   }
   if (req.body?.notes !== undefined) {
@@ -234,25 +273,49 @@ router.patch("/:id", requireAction("managePurchaseOrders"), async (req, res) => 
     data.expectedDate = expectedDate;
   }
 
-  const order = await prisma.purchaseOrder.update({
-    where: { id },
-    data,
-    include: DETAIL_INCLUDE,
-  });
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "purchaseOrder.update",
-    entityType: "PurchaseOrder",
-    entityId: order.id,
-    before: { status: before.status, notes: before.notes, expectedDate: before.expectedDate },
-    after: { status: order.status, notes: order.notes, expectedDate: order.expectedDate },
+  const order = await prisma.$transaction(async (tx) => {
+    const updated = await tx.purchaseOrder.update({
+      where: { id },
+      data,
+      include: DETAIL_INCLUDE,
+    });
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "purchaseOrder.update",
+        entityType: "PurchaseOrder",
+        entityId: updated.id,
+        before: {
+          status: before.status,
+          notes: before.notes,
+          expectedDate: before.expectedDate,
+        },
+        after: {
+          status: updated.status,
+          notes: updated.notes,
+          expectedDate: updated.expectedDate,
+        },
+      },
+      tx
+    );
+    return updated;
   });
 
   res.json(order);
 });
 
 router.post("/:id/receive", requireAction("manageStock"), async (req, res) => {
+  let idempotencyKey: string | null;
+  try {
+    idempotencyKey = parseIdempotencyKey(req.header("Idempotency-Key"));
+  } catch (error) {
+    if (error instanceof InvalidIdempotencyKeyError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     res.status(400).json({ error: "Invalid purchase order id" });
@@ -286,7 +349,8 @@ router.post("/:id/receive", requireAction("manageStock"), async (req, res) => {
   }
 
   const poItemsByItemId = new Map(order.items.map((i) => [i.itemId, i]));
-  const receipts: { poItemId: number; itemId: number; quantity: number }[] = [];
+  const receipts: { itemId: number; quantity: number }[] = [];
+  const requestedByItemId = new Map<number, number>();
 
   for (const raw of rawReceipts) {
     const itemId = Number(raw?.itemId);
@@ -301,61 +365,251 @@ router.post("/:id/receive", requireAction("manageStock"), async (req, res) => {
       res.status(400).json({ error: "Receipt quantity must be a positive whole number" });
       return;
     }
-    if (poItem.quantityReceived + quantity > poItem.quantityOrdered) {
+    try {
+      validateStockQuantity("INWARD", quantity);
+    } catch (error) {
+      if (error instanceof InvalidStockQuantityError) {
+        res.status(400).json({ error: error.message });
+        return;
+      }
+      throw error;
+    }
+    const requestedQuantity = (requestedByItemId.get(itemId) ?? 0) + quantity;
+    if (poItem.quantityReceived + requestedQuantity > poItem.quantityOrdered) {
       res.status(400).json({
         error: `Cannot receive more than ordered for item ${poItem.itemId}`,
       });
       return;
     }
 
-    receipts.push({ poItemId: poItem.id, itemId, quantity });
+    requestedByItemId.set(itemId, requestedQuantity);
+    receipts.push({ itemId, quantity });
+  }
+  const requestHash = idempotencyKey
+    ? hashReceiptRequest({ purchaseOrderId: id, receipts, toLocationId })
+    : null;
+
+  let updated;
+  let replayed = false;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      updated = await prisma.$transaction(
+        async (tx) => {
+          const currentOrder = await tx.purchaseOrder.findUnique({
+            where: { id: order.id },
+            include: DETAIL_INCLUDE,
+          });
+          if (!currentOrder) {
+            throw new InvalidReceiptError("Purchase order not found");
+          }
+
+          if (idempotencyKey && requestHash) {
+            const existingKey =
+              await tx.purchaseOrderReceiptIdempotencyKey.findUnique({
+                where: {
+                  actorId_operation_key: {
+                    actorId: req.session!.userId,
+                    operation: PURCHASE_ORDER_RECEIVE_OPERATION,
+                    key: idempotencyKey,
+                  },
+                },
+              });
+            if (existingKey) {
+              if (existingKey.requestHash !== requestHash) {
+                throw new ReceiptIdempotencyConflictError();
+              }
+              replayed = true;
+              return currentOrder;
+            }
+          }
+
+          try {
+            assertReceiptState(currentOrder.status);
+          } catch (error) {
+            if (error instanceof InvalidReceiptStateError) {
+              throw error;
+            }
+            throw error;
+          }
+
+          const currentItemsByItemId = new Map(
+            currentOrder.items.map((item) => [item.itemId, item])
+          );
+          const currentRequestedByItemId = new Map<number, number>();
+          for (const receipt of receipts) {
+            const poItem = currentItemsByItemId.get(receipt.itemId);
+            if (!poItem) {
+              throw new InvalidReceiptError(
+                "A receipt line references an item not on this order"
+              );
+            }
+
+            const requestedQuantity =
+              (currentRequestedByItemId.get(receipt.itemId) ?? 0) + receipt.quantity;
+            if (
+              poItem.quantityReceived + requestedQuantity >
+              poItem.quantityOrdered
+            ) {
+              throw new InvalidReceiptError(
+                `Cannot receive more than ordered for item ${poItem.itemId}`
+              );
+            }
+            currentRequestedByItemId.set(receipt.itemId, requestedQuantity);
+          }
+
+          for (const [itemId, quantity] of currentRequestedByItemId) {
+            const stockTotals = await tx.stockTransaction.groupBy({
+              by: ["type"],
+              where: { itemId },
+              _sum: { quantity: true },
+            });
+            assertStockChangeAllowed(
+              calculateCurrentStock(stockTotals),
+              "INWARD",
+              quantity
+            );
+          }
+
+          if (toLocationId !== null) {
+            for (const itemId of [...currentRequestedByItemId.keys()].sort((a, b) => a - b)) {
+              await applyLocationStockChanges(tx, itemId, [
+                { locationId: toLocationId, delta: currentRequestedByItemId.get(itemId)! },
+              ]);
+            }
+          }
+
+          for (const receipt of receipts) {
+            const poItem = currentItemsByItemId.get(receipt.itemId)!;
+            await tx.purchaseOrderItem.update({
+              where: { id: poItem.id },
+              data: { quantityReceived: { increment: receipt.quantity } },
+            });
+            await tx.stockTransaction.create({
+              data: {
+                type: "INWARD",
+                quantity: receipt.quantity,
+                itemId: receipt.itemId,
+                supplierId: currentOrder.supplierId,
+                toLocationId,
+                purchaseOrderId: currentOrder.id,
+                referenceNumber: currentOrder.poNumber,
+                createdById: req.session!.userId,
+              },
+            });
+          }
+
+          const items = await tx.purchaseOrderItem.findMany({
+            where: { purchaseOrderId: currentOrder.id },
+          });
+          const status = getReceiptStatus(items, currentOrder.status);
+
+          const result = await tx.purchaseOrder.update({
+            where: { id: currentOrder.id },
+            data: { status },
+            include: DETAIL_INCLUDE,
+          });
+
+          await recordAudit(
+            {
+              actorId: req.session!.userId,
+              action: "purchaseOrder.receive",
+              entityType: "PurchaseOrder",
+              entityId: currentOrder.id,
+              after: { receipts, status: result.status },
+            },
+            tx
+          );
+
+          if (idempotencyKey && requestHash) {
+            await tx.purchaseOrderReceiptIdempotencyKey.create({
+              data: {
+                key: idempotencyKey,
+                operation: PURCHASE_ORDER_RECEIVE_OPERATION,
+                requestHash,
+                actorId: req.session!.userId,
+                purchaseOrderId: currentOrder.id,
+              },
+            });
+          }
+
+          return result;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+      break;
+    } catch (error) {
+      if (error instanceof InvalidReceiptError) {
+        res.status(error.message === "Purchase order not found" ? 404 : 400).json({
+          error: error.message,
+        });
+        return;
+      }
+
+      if (error instanceof InvalidReceiptStateError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+
+      if (error instanceof ReceiptIdempotencyConflictError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+
+      if (error instanceof InsufficientStockError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+
+      const isSerializationConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2034";
+      if (isSerializationConflict && attempt < 2) continue;
+      if (isSerializationConflict) {
+        res.status(409).json({
+          error: "Stock changed concurrently. Please retry the receipt.",
+        });
+        return;
+      }
+
+      if (
+        idempotencyKey &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const existing =
+          await prisma.purchaseOrderReceiptIdempotencyKey.findUnique({
+            where: {
+              actorId_operation_key: {
+                actorId: req.session!.userId,
+                operation: PURCHASE_ORDER_RECEIVE_OPERATION,
+                key: idempotencyKey,
+              },
+            },
+          });
+        if (!existing) throw error;
+        if (existing.requestHash !== requestHash) {
+          res.status(409).json({
+            error: "Idempotency-Key was already used with a different receipt request",
+          });
+          return;
+        }
+        updated = await prisma.purchaseOrder.findUnique({
+          where: { id: existing.purchaseOrderId },
+          include: DETAIL_INCLUDE,
+        });
+        if (!updated) {
+          throw new Error("Purchase order receipt result was not found");
+        }
+        replayed = true;
+        break;
+      }
+      throw error;
+    }
   }
 
-  const updated = await prisma.$transaction(async (tx) => {
-    for (const receipt of receipts) {
-      await tx.purchaseOrderItem.update({
-        where: { id: receipt.poItemId },
-        data: { quantityReceived: { increment: receipt.quantity } },
-      });
-      await tx.stockTransaction.create({
-        data: {
-          type: "INWARD",
-          quantity: receipt.quantity,
-          itemId: receipt.itemId,
-          supplierId: order.supplierId,
-          toLocationId,
-          purchaseOrderId: order.id,
-          referenceNumber: order.poNumber,
-          createdById: req.session!.userId,
-        },
-      });
-    }
-
-    const items = await tx.purchaseOrderItem.findMany({
-      where: { purchaseOrderId: order.id },
-    });
-    const fullyReceived = items.every((i) => i.quantityReceived >= i.quantityOrdered);
-    const anyReceived = items.some((i) => i.quantityReceived > 0);
-    const status: PurchaseOrderStatus = fullyReceived
-      ? "RECEIVED"
-      : anyReceived
-        ? "PARTIALLY_RECEIVED"
-        : order.status;
-
-    return tx.purchaseOrder.update({
-      where: { id: order.id },
-      data: { status },
-      include: DETAIL_INCLUDE,
-    });
-  });
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "purchaseOrder.receive",
-    entityType: "PurchaseOrder",
-    entityId: order.id,
-    after: { receipts, status: updated.status },
-  });
+  if (!updated) {
+    throw new Error("Purchase order receipt completed without a result");
+  }
 
   res.json(updated);
 });

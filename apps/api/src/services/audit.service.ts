@@ -10,8 +10,13 @@ export type RecordAuditInput = {
   after?: Prisma.InputJsonValue | null;
 };
 
-export async function recordAudit(input: RecordAuditInput) {
-  return prisma.auditLog.create({
+type AuditDatabase = Pick<typeof prisma, "auditLog">;
+
+export async function recordAudit(
+  input: RecordAuditInput,
+  database: AuditDatabase = prisma
+) {
+  return database.auditLog.create({
     data: {
       actorId: input.actorId,
       action: input.action,

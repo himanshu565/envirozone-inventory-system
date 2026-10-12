@@ -10,6 +10,7 @@ import {
   Users as UsersIcon,
   Settings,
   History,
+  Cpu,
 } from "lucide-react";
 import type { Role } from "@envirozone/auth";
 
@@ -22,6 +23,7 @@ const NAV_ITEMS: {
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inventory", label: "Inventory", icon: Package },
   { href: "/stock", label: "Stock", icon: Warehouse },
+  { href: "/assets", label: "Assets", icon: Cpu },
   { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
   { href: "/audit-log", label: "Audit Log", icon: History, adminOnly: true },

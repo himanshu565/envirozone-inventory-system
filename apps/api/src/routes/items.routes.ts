@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { Prisma } from "@prisma/client";
+import { Prisma, type TrackingMode } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth, requireAction } from "../middleware/auth.middleware";
 import { recordAudit } from "../services/audit.service";
@@ -14,6 +14,7 @@ import {
 const router = Router();
 
 const ALLOWED_SORT_FIELDS = ["name", "itemCode", "minimumStock", "createdAt"];
+const TRACKING_MODES: TrackingMode[] = ["QUANTITY", "SERIALIZED"];
 
 function itemAuditSnapshot(item: {
   id: number;
@@ -22,6 +23,7 @@ function itemAuditSnapshot(item: {
   description: string | null;
   unit: string;
   minimumStock: number;
+  trackingMode: TrackingMode;
   categoryId: number;
 }) {
   return {
@@ -31,6 +33,7 @@ function itemAuditSnapshot(item: {
     description: item.description,
     unit: item.unit,
     minimumStock: item.minimumStock,
+    trackingMode: item.trackingMode,
     categoryId: item.categoryId,
   };
 }
@@ -84,6 +87,10 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
     ? Math.max(0, Math.trunc(Number(req.body.minimumStock)))
     : 0;
   const categoryId = Number(req.body?.categoryId);
+  const trackingMode =
+    typeof req.body?.trackingMode === "string" && req.body.trackingMode
+      ? req.body.trackingMode
+      : "QUANTITY";
 
   if (!itemCode || !name) {
     res.status(400).json({ error: "Item code and name are required" });
@@ -92,6 +99,13 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
 
   if (!Number.isInteger(categoryId)) {
     res.status(400).json({ error: "A valid category is required" });
+    return;
+  }
+
+  if (!TRACKING_MODES.includes(trackingMode as TrackingMode)) {
+    res.status(400).json({
+      error: `Tracking mode must be one of: ${TRACKING_MODES.join(", ")}`,
+    });
     return;
   }
 
@@ -107,24 +121,31 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
     return;
   }
 
-  const item = await prisma.item.create({
-    data: {
-      itemCode,
-      name,
-      description: description || null,
-      unit,
-      minimumStock,
-      categoryId,
-    },
-    include: { category: { select: { id: true, name: true } } },
-  });
+  const item = await prisma.$transaction(async (tx) => {
+    const created = await tx.item.create({
+      data: {
+        itemCode,
+        name,
+        description: description || null,
+        unit,
+        minimumStock,
+        trackingMode: trackingMode as TrackingMode,
+        categoryId,
+      },
+      include: { category: { select: { id: true, name: true } } },
+    });
 
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "item.create",
-    entityType: "Item",
-    entityId: item.id,
-    after: itemAuditSnapshot(item),
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "item.create",
+        entityType: "Item",
+        entityId: created.id,
+        after: itemAuditSnapshot(created),
+      },
+      tx
+    );
+    return created;
   });
 
   res.status(201).json(item);
@@ -161,6 +182,15 @@ router.patch("/:id", requireAction("manageMasterData"), async (req, res) => {
     }
     data.minimumStock = Math.max(0, Math.trunc(Number(req.body.minimumStock)));
   }
+  if (req.body?.trackingMode !== undefined) {
+    if (!TRACKING_MODES.includes(req.body.trackingMode as TrackingMode)) {
+      res.status(400).json({
+        error: `Tracking mode must be one of: ${TRACKING_MODES.join(", ")}`,
+      });
+      return;
+    }
+    data.trackingMode = req.body.trackingMode as TrackingMode;
+  }
   if (req.body?.categoryId !== undefined) {
     const categoryId = Number(req.body.categoryId);
     if (!Number.isInteger(categoryId)) {
@@ -175,19 +205,25 @@ router.patch("/:id", requireAction("manageMasterData"), async (req, res) => {
     data.category = { connect: { id: categoryId } };
   }
 
-  const item = await prisma.item.update({
-    where: { id },
-    data,
-    include: { category: { select: { id: true, name: true } } },
-  });
+  const item = await prisma.$transaction(async (tx) => {
+    const updated = await tx.item.update({
+      where: { id },
+      data,
+      include: { category: { select: { id: true, name: true } } },
+    });
 
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "item.update",
-    entityType: "Item",
-    entityId: item.id,
-    before: itemAuditSnapshot(before),
-    after: itemAuditSnapshot(item),
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "item.update",
+        entityType: "Item",
+        entityId: updated.id,
+        before: itemAuditSnapshot(before),
+        after: itemAuditSnapshot(updated),
+      },
+      tx
+    );
+    return updated;
   });
 
   res.json(item);
@@ -207,7 +243,19 @@ router.delete("/:id", requireAction("manageMasterData"), async (req, res) => {
   }
 
   try {
-    await prisma.item.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.item.delete({ where: { id } });
+      await recordAudit(
+        {
+          actorId: req.session!.userId,
+          action: "item.delete",
+          entityType: "Item",
+          entityId: id,
+          before: itemAuditSnapshot(before),
+        },
+        tx
+      );
+    });
   } catch (err) {
     if (
       err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -220,14 +268,6 @@ router.delete("/:id", requireAction("manageMasterData"), async (req, res) => {
     }
     throw err;
   }
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "item.delete",
-    entityType: "Item",
-    entityId: id,
-    before: itemAuditSnapshot(before),
-  });
 
   res.status(204).send();
 });

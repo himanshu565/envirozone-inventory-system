@@ -15,6 +15,8 @@ import stockRoutes from "./routes/stock.routes";
 import purchaseOrdersRoutes from "./routes/purchase-orders.routes";
 import organizationRoutes from "./routes/organization.routes";
 import auditLogsRoutes from "./routes/audit-logs.routes";
+import assetsRoutes from "./routes/assets.routes";
+import reportsRoutes from "./routes/reports.routes";
 
 export const app = express();
 
@@ -58,6 +60,8 @@ app.use("/api/stock", stockRoutes);
 app.use("/api/purchase-orders", purchaseOrdersRoutes);
 app.use("/api/organization", organizationRoutes);
 app.use("/api/audit-logs", auditLogsRoutes);
+app.use("/api/assets", assetsRoutes);
+app.use("/api/reports", reportsRoutes);
 
 app.use(
   (

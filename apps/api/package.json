@@ -6,7 +6,13 @@
     "postinstall": "prisma generate",
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc",
+    "typecheck": "tsc --noEmit",
     "test:stock-ledger": "node --import tsx --test test/stock-ledger.test.ts",
+    "test:reports": "node --import tsx --test test/reports.test.ts",
+    "test:stock-ledger:integration": "node --import tsx --test test/stock-ledger.integration.test.ts",
+    "test:purchase-order-receiving:integration": "node --import tsx --test test/purchase-order-receiving.integration.test.ts",
+    "test:serialized-assets:integration": "node --import tsx --test test/serialized-assets.integration.test.ts",
+    "stock:locations:backfill": "tsx src/prisma/backfill-location-balances.ts",
     "start": "node dist/server.js",
     "seed": "tsx src/prisma/seed.ts",
     "migrate:deploy": "prisma migrate deploy"

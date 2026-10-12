@@ -8,11 +8,18 @@ import { SortableHeader } from "@/components/ui/sortable-header";
 import { TableSkeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 
-type TransactionType = "INWARD" | "OUTWARD" | "ADJUSTMENT";
+type TransactionType = "INWARD" | "OUTWARD" | "ADJUSTMENT" | "TRANSFER";
 
 type Item = { id: number; itemCode: string; name: string };
 type Supplier = { id: number; name: string; isActive: boolean };
 type Location = { id: number; name: string; isActive: boolean };
+type LocationBalance = {
+  itemId: number;
+  locationId: number;
+  quantity: number;
+  item: { id: number; itemCode: string; name: string };
+  location: { id: number; name: string; isActive: boolean };
+};
 
 type Transaction = {
   id: number;
@@ -33,7 +40,12 @@ type TransactionsResponse = {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 };
 
-const TRANSACTION_TYPES: TransactionType[] = ["INWARD", "OUTWARD", "ADJUSTMENT"];
+const TRANSACTION_TYPES: TransactionType[] = [
+  "INWARD",
+  "OUTWARD",
+  "ADJUSTMENT",
+  "TRANSFER",
+];
 
 const emptyForm = {
   type: "INWARD" as TransactionType,
@@ -60,6 +72,7 @@ export function StockMovements({
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
+  const [locationBalances, setLocationBalances] = useState<LocationBalance[]>([]);
 
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [pagination, setPagination] = useState({
@@ -78,12 +91,13 @@ export function StockMovements({
 
   async function loadOptions() {
     try {
-      const [itemsRes, suppliersRes, locationsRes] = await Promise.all([
+      const [itemsRes, suppliersRes, locationsRes, balancesRes] = await Promise.all([
         fetch(`${API_URL}/api/items?pageSize=100&sortBy=name`, {
           credentials: "include",
         }),
         fetch(`${API_URL}/api/suppliers`, { credentials: "include" }),
         fetch(`${API_URL}/api/locations`, { credentials: "include" }),
+        fetch(`${API_URL}/api/stock/balances`, { credentials: "include" }),
       ]);
       if (itemsRes.ok) {
         const body: { data: Item[] } = await itemsRes.json();
@@ -96,6 +110,7 @@ export function StockMovements({
       }
       if (suppliersRes.ok) setSuppliers(await suppliersRes.json());
       if (locationsRes.ok) setLocations(await locationsRes.json());
+      if (balancesRes.ok) setLocationBalances(await balancesRes.json());
     } catch {
       setFormError("Unable to load form options");
     }
@@ -283,10 +298,11 @@ export function StockMovements({
 
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-slate-700">
-                From location (optional)
+                From location {form.type === "TRANSFER" ? "(required)" : "(optional)"}
               </span>
               <select
                 value={form.fromLocationId}
+                required={form.type === "TRANSFER" || form.type === "OUTWARD"}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, fromLocationId: e.target.value }))
                 }
@@ -303,10 +319,11 @@ export function StockMovements({
 
             <label className="block">
               <span className="mb-1 block text-sm font-medium text-slate-700">
-                To location (optional)
+                To location {form.type === "TRANSFER" ? "(required)" : "(optional)"}
               </span>
               <select
                 value={form.toLocationId}
+                required={form.type === "TRANSFER" || form.type === "INWARD"}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, toLocationId: e.target.value }))
                 }
@@ -370,6 +387,47 @@ export function StockMovements({
 
       <div className="rounded-lg border border-slate-200 bg-white">
         <div className="border-b border-slate-200 px-6 py-4">
+          <h2 className="text-sm font-semibold text-slate-900">Location balances</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Balances include only movements with an explicit location; historical
+            movements without one remain unallocated.
+          </p>
+        </div>
+        <div className="overflow-x-auto px-6 py-4">
+          {locationBalances.length === 0 ? (
+            <p className="text-sm text-slate-500">No location balances recorded yet.</p>
+          ) : (
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="text-xs uppercase tracking-wide text-slate-400">
+                  <th className="pb-3 font-medium">Item</th>
+                  <th className="pb-3 font-medium">Location</th>
+                  <th className="pb-3 text-right font-medium">Quantity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {locationBalances.map((balance) => (
+                  <tr
+                    key={`${balance.itemId}-${balance.locationId}`}
+                    className="border-t border-slate-100"
+                  >
+                    <td className="py-3 text-slate-900">
+                      {balance.item.itemCode} — {balance.item.name}
+                    </td>
+                    <td className="py-3 text-slate-500">{balance.location.name}</td>
+                    <td className="py-3 text-right font-semibold tabular-nums">
+                      {balance.quantity}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 px-6 py-4">
           <h2 className="text-sm font-semibold text-slate-900">Recent movements</h2>
         </div>
 
@@ -383,7 +441,7 @@ export function StockMovements({
               title="No stock movements recorded yet"
               description={
                 canManage
-                  ? "Record your first inward, outward, or adjustment above."
+                  ? "Record your first inward, outward, adjustment, or transfer above."
                   : undefined
               }
             />
@@ -484,6 +542,7 @@ function TypeBadge({ type }: { type: TransactionType }) {
     INWARD: "bg-emerald-50 text-emerald-700",
     OUTWARD: "bg-red-50 text-red-700",
     ADJUSTMENT: "bg-sky-50 text-sky-700",
+    TRANSFER: "bg-violet-50 text-violet-700",
   };
   return (
     <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${styles[type]}`}>

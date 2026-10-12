@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: postgresql://envirozone:envirozone_ci@localhost:5433/envirozone_ci
+      JWT_SECRET: ci-only-not-a-secret
+      WEB_ORIGIN: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma validate --config apps/api/prisma.config.ts
+      - run: npm run typecheck -w apps/api
+      - run: npm run lint -w apps/web
+      - run: npm run test:stock-ledger -w apps/api
+      - run: npm run test:reports -w apps/api
+      - run: npm run test:stock-ledger:integration -w apps/api
+      - run: npm run test:purchase-order-receiving:integration -w apps/api
+      - run: npm run test:serialized-assets:integration -w apps/api
+      - run: npm run build

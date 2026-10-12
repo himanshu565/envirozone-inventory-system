@@ -3,6 +3,15 @@ import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/password";
 
 async function main() {
+  if (
+    process.env.NODE_ENV === "production" &&
+    (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)
+  ) {
+    throw new Error(
+      "Production seeding requires explicit ADMIN_EMAIL and ADMIN_PASSWORD"
+    );
+  }
+
   const email = process.env.ADMIN_EMAIL ?? "admin@envirozone.local";
   const password = process.env.ADMIN_PASSWORD ?? "ChangeMe123!";
   const name = process.env.ADMIN_NAME ?? "Admin";
@@ -18,7 +27,8 @@ async function main() {
     data: { name, email, password: passwordHash, role: "ADMIN" },
   });
 
-  console.log(`Created admin user: ${admin.email} (password: ${password})`);
+  console.log(`Created admin user: ${admin.email}`);
+  console.log("Store the configured ADMIN_PASSWORD securely; it is not printed.");
 }
 
 main()

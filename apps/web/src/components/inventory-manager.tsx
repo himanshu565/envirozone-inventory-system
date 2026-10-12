@@ -21,6 +21,7 @@ type Item = {
   description: string | null;
   unit: string;
   minimumStock: number;
+  trackingMode: "QUANTITY" | "SERIALIZED";
   categoryId: number;
   category: Category;
   currentStock: number;
@@ -37,6 +38,7 @@ const emptyItemForm = {
   description: "",
   unit: "pcs",
   minimumStock: "0",
+  trackingMode: "QUANTITY" as "QUANTITY" | "SERIALIZED",
   categoryId: "",
 };
 
@@ -167,6 +169,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
       description: item.description ?? "",
       unit: item.unit,
       minimumStock: String(item.minimumStock),
+      trackingMode: item.trackingMode,
       categoryId: String(item.categoryId),
     });
   }
@@ -191,6 +194,7 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
       description: itemForm.description,
       unit: itemForm.unit,
       minimumStock: Number(itemForm.minimumStock),
+      trackingMode: itemForm.trackingMode,
       categoryId: Number(itemForm.categoryId),
     };
 
@@ -403,6 +407,25 @@ export function InventoryManager({ canManage }: { canManage: boolean }) {
                 }
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
               />
+            </label>
+
+            <label className="block">
+              <span className="mb-1 block text-sm font-medium text-slate-700">
+                Tracking
+              </span>
+              <select
+                value={itemForm.trackingMode}
+                onChange={(e) =>
+                  setItemForm((prev) => ({
+                    ...prev,
+                    trackingMode: e.target.value as "QUANTITY" | "SERIALIZED",
+                  }))
+                }
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="QUANTITY">Quantity / consumable</option>
+                <option value="SERIALIZED">Serialized equipment</option>
+              </select>
             </label>
 
             <label className="col-span-2 block">

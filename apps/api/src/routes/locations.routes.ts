@@ -57,20 +57,26 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
     return;
   }
 
-  const location = await prisma.location.create({
-    data: {
-      name,
-      type: type as LocationType,
-      address: optionalString(req.body?.address),
-    },
-  });
+  const location = await prisma.$transaction(async (tx) => {
+    const created = await tx.location.create({
+      data: {
+        name,
+        type: type as LocationType,
+        address: optionalString(req.body?.address),
+      },
+    });
 
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "location.create",
-    entityType: "Location",
-    entityId: location.id,
-    after: locationSnapshot(location),
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "location.create",
+        entityType: "Location",
+        entityId: created.id,
+        after: locationSnapshot(created),
+      },
+      tx
+    );
+    return created;
   });
 
   res.status(201).json(location);
@@ -113,15 +119,20 @@ router.patch("/:id", requireAction("manageMasterData"), async (req, res) => {
     data.isActive = req.body.isActive;
   }
 
-  const location = await prisma.location.update({ where: { id }, data });
-
-  await recordAudit({
-    actorId: req.session!.userId,
-    action: "location.update",
-    entityType: "Location",
-    entityId: location.id,
-    before: locationSnapshot(before),
-    after: locationSnapshot(location),
+  const location = await prisma.$transaction(async (tx) => {
+    const updated = await tx.location.update({ where: { id }, data });
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "location.update",
+        entityType: "Location",
+        entityId: updated.id,
+        before: locationSnapshot(before),
+        after: locationSnapshot(updated),
+      },
+      tx
+    );
+    return updated;
   });
 
   res.json(location);

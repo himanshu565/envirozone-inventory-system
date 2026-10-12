@@ -244,6 +244,8 @@ apps/api/src/prisma/migrations/
 ├── 20260822110423_init/                                         (Category, Item, User, Supplier, Location, StockTransaction)
 ├── 20260831190016_add_organization_purchase_orders_audit_log/    (Organization, PurchaseOrder, PurchaseOrderItem, AuditLog)
 ├── 20260910180705_rename_staff_role_to_accounts/                 (hand-written — see 3.3)
+├── 20261012134712_add_stock_transaction_idempotency/              (keyed stock request deduplication)
+├── 20261012141000_add_purchase_order_receipt_idempotency/          (keyed receipt deduplication)
 └── migration_lock.toml
 ```
 
@@ -862,6 +864,17 @@ just move the ambiguity into `remarks` text instead of resolving it.
 physical stock movement is a different responsibility from editing what an item *is*, and the
 two are given to different roles for exactly that reason (5.4).
 
+The endpoint also accepts an optional `Idempotency-Key` header. The key must be 1-255 printable
+ASCII characters with no surrounding whitespace. It is scoped to the authenticated actor and
+the `stock.transaction.create` operation. The server hashes the normalized request fields
+(`type`, `itemId`, `quantity`, supplier/location IDs, reference number, and remarks) and stores
+the key, hash, created stock transaction, and audit row in one serializable database
+transaction. A successful first request returns `201`; an equivalent retry returns the same
+transaction with `200` and does not append another ledger or audit row. Reusing a key with a
+different payload returns `409`. Requests without the header retain the existing independent
+creation behavior. There is currently no organization foreign-key boundary in the schema, so
+organization is not included in the key scope.
+
 ### 5.12 `suppliers.routes.ts` / `locations.routes.ts` — deactivate, don't delete
 
 Both models have an `isActive` boolean in the schema, and neither route file has a `DELETE`
@@ -884,6 +897,12 @@ recompute the order's status — and none of those three should happen without t
 the whole thing runs inside `prisma.$transaction(...)`. If the process crashed halfway through
 without that, you could end up with stock recorded as received but the PO still showing `SENT`,
 or vice versa — a state no valid sequence of real-world events could produce.
+
+Receiving is permitted only from `SENT` or `PARTIALLY_RECEIVED`. The transition to
+`PARTIALLY_RECEIVED` or `RECEIVED` is derived from all line counters, and invalid terminal or
+draft states return a conflict. An optional `Idempotency-Key` is scoped to the actor and
+`purchase-order.receive`; its request hash and the receipt result are persisted in the same
+transaction as the counters, stock rows, and audit record, so a retry cannot double-receive.
 
 ```ts
 if (poItem.quantityReceived + quantity > poItem.quantityOrdered) {
@@ -1434,3 +1453,37 @@ None of these are wrong to be missing at this stage — they're the next things 
 roughly the order a real production rollout would force them into priority. See
 [DEPLOYMENT.md](./DEPLOYMENT.md#7-known-gaps-worth-knowing-before-you-ship) for the subset of
 this list that specifically matters before a first deploy.
+## Location-aware stock
+
+The location-aware ledger is additive. `LocationStockBalance` stores the current
+quantity for an `(item, location)` pair. `INWARD` adds to `toLocationId`,
+`OUTWARD` subtracts from `fromLocationId`, and a signed `ADJUSTMENT` changes the
+selected location. A `TRANSFER` requires distinct source and destination
+locations, subtracts from the source, adds to the destination, and contributes
+zero to the organization-wide item total. Source balances are locked in sorted
+location order inside the same serializable transaction as the ledger row and
+audit record.
+
+Historical rows are not guessed. The
+`npm run stock:locations:backfill -w apps/api` command is a dry run by default.
+It only considers rows whose location metadata unambiguously identifies the
+affected location; rows with missing or ambiguous locations are reported as
+skipped. Applying requires `--apply`,
+`LOCATION_BACKFILL_ALLOW_APPLY=YES`, and a reviewed backup/restore plan. The
+migration itself creates no balance rows.
+
+## Serialized asset foundation
+
+Serialized equipment is opt-in through `Item.trackingMode`. Existing and new
+quantity-based items default to `QUANTITY`; only items explicitly marked
+`SERIALIZED` can receive a record in `SerializedAsset`. An asset has a unique
+asset tag, an optional unique serial number, lifecycle status, optional current
+location and assigned user, and optional purchase, warranty, and notes fields.
+
+`/api/assets` currently supports authenticated listing, detail retrieval, and
+master-data-authorized registration. Registration validates the model tracking
+mode and all related IDs, starts in `IN_STOCK`, and writes its `AuditLog` row in
+the same transaction. The additive migration does not infer assets from
+historical quantity transactions. Transfers, asset history, maintenance,
+calibration tasks, and reminders are intentionally deferred to the next
+workflow phase.

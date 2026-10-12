@@ -26,6 +26,15 @@ type DashboardItem = {
   category: { id: number; name: string };
 };
 
+type ReportItem = {
+  itemId: number;
+  itemCode: string;
+  itemName: string;
+  minimumStock: number;
+  currentStock: number;
+  category: { id: number; name: string };
+};
+
 type Stats = {
   totalItems: number | null;
   totalCategories: number | null;
@@ -75,20 +84,30 @@ export function Dashboard({ role }: { role: Role }) {
 
         if (cancelled) return;
 
-        const belowMinimum = itemsBody.data
-          .filter((item) => item.currentStock < item.minimumStock)
-          .sort(
-            (a, b) =>
-              a.currentStock - a.minimumStock - (b.currentStock - b.minimumStock)
-          );
+        const overviewRes = await fetch(`${API_URL}/api/reports/stock/items?pageSize=5&lowStock=true&sortBy=variance&sortDir=asc`, {
+          credentials: "include",
+        });
+        if (!overviewRes.ok) throw new Error("Failed to load stock report");
+        const lowStockBody: { data: ReportItem[]; pagination: { total: number } } =
+          await overviewRes.json();
 
         setRecentItems(itemsBody.data.slice(0, 5));
-        setLowStockItems(belowMinimum.slice(0, 5));
+        setLowStockItems(
+          lowStockBody.data.map((item) => ({
+            id: item.itemId,
+            itemCode: item.itemCode,
+            name: item.itemName,
+            minimumStock: item.minimumStock,
+            currentStock: item.currentStock,
+            category: item.category,
+            createdAt: "",
+          }))
+        );
         setStats({
           totalItems: itemsBody.pagination.total,
           totalCategories: categories.length,
           totalUsers: users ? users.length : null,
-          lowStockCount: belowMinimum.length,
+          lowStockCount: lowStockBody.pagination.total,
         });
       } catch {
         if (!cancelled) setError("Unable to load dashboard data");

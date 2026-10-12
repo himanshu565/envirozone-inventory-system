@@ -33,6 +33,11 @@ npm run seed -w apps/api
 Redis is included for future infrastructure needs but is not currently used by
 the application. Do not configure application behavior to depend on it yet.
 
+The optional knowledge assistant is disabled by default. It only answers from
+approved documents and never performs stock, purchase-order, or asset changes.
+Enable it only after configuring the `AI_*` variables in
+[`apps/api/.env.example`](apps/api/.env.example).
+
 ## Development
 
 ```bash

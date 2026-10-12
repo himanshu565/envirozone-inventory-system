@@ -5,7 +5,10 @@ export type Action =
   | "manageStock"
   | "managePurchaseOrders"
   | "manageUsers"
-  | "viewReports";
+  | "viewReports"
+  | "manageKnowledgeDocuments"
+  | "approveKnowledgeDocuments"
+  | "useKnowledgeAssistant";
 
 const PERMISSIONS: Record<Role, Action[]> = {
   ADMIN: [
@@ -14,15 +17,21 @@ const PERMISSIONS: Record<Role, Action[]> = {
     "managePurchaseOrders",
     "manageUsers",
     "viewReports",
+    "manageKnowledgeDocuments",
+    "approveKnowledgeDocuments",
+    "useKnowledgeAssistant",
   ],
   STORE_MANAGER: [
     "manageMasterData",
     "manageStock",
     "managePurchaseOrders",
     "viewReports",
+    "manageKnowledgeDocuments",
+    "approveKnowledgeDocuments",
+    "useKnowledgeAssistant",
   ],
-  ACCOUNTS: ["managePurchaseOrders", "viewReports"],
-  VIEWER: [],
+  ACCOUNTS: ["managePurchaseOrders", "viewReports", "useKnowledgeAssistant"],
+  VIEWER: ["useKnowledgeAssistant"],
 };
 
 export function can(role: Role, action: Action): boolean {

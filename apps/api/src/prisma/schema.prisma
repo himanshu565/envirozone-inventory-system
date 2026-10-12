@@ -34,6 +34,7 @@ model Item {
   locationBalances   LocationStockBalance[]
   purchaseOrderItems PurchaseOrderItem[]
   serializedAssets   SerializedAsset[]
+  knowledgeDocuments KnowledgeDocument[]
 }
 
 enum TrackingMode {
@@ -54,6 +55,8 @@ model User {
   email    String @unique
   password String
   role     Role   @default(ACCOUNTS)
+  organizationId Int?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -64,6 +67,8 @@ model User {
   stockIdempotencyKeys  StockTransactionIdempotencyKey[]
   purchaseOrderReceiptIdempotencyKeys PurchaseOrderReceiptIdempotencyKey[]
   assignedAssets        SerializedAsset[]
+  uploadedKnowledgeDocuments KnowledgeDocument[] @relation("KnowledgeUploadedBy")
+  approvedKnowledgeDocuments KnowledgeDocument[] @relation("KnowledgeApprovedBy")
 }
 
 model Organization {
@@ -77,6 +82,8 @@ model Organization {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  users User[]
+  knowledgeDocuments KnowledgeDocument[]
 }
 
 model Supplier {
@@ -305,4 +312,59 @@ model AuditLog {
 
   @@index([entityType, entityId])
   @@index([createdAt])
+}
+
+enum KnowledgeDocumentStatus {
+  UPLOADED
+  REVIEW_REQUIRED
+  APPROVED
+  REJECTED
+  RETIRED
+  FAILED
+}
+
+model KnowledgeDocument {
+  id              Int                    @id @default(autoincrement())
+  title           String
+  originalFileName String
+  mimeType        String
+  contentHash     String                 @unique
+  sourceText      String
+  status          KnowledgeDocumentStatus @default(REVIEW_REQUIRED)
+  organizationId  Int?
+  itemId          Int?
+  uploadedById    Int
+  approvedById    Int?
+  approvedAt      DateTime?
+  extractionError String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  item         Item?         @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  uploadedBy   User          @relation("KnowledgeUploadedBy", fields: [uploadedById], references: [id])
+  approvedBy   User?         @relation("KnowledgeApprovedBy", fields: [approvedById], references: [id])
+  chunks       KnowledgeChunk[]
+
+  @@index([status, organizationId])
+  @@index([itemId, status])
+}
+
+model KnowledgeChunk {
+  id           Int      @id @default(autoincrement())
+  documentId   Int
+  chunkIndex   Int
+  text         String
+  pageNumber   Int?
+  sectionTitle String?
+  headingPath  String?
+  embedding    Json?
+  embeddingModel String?
+  tokenCount   Int?
+  createdAt    DateTime @default(now())
+
+  document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([documentId])
 }

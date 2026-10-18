@@ -16,7 +16,16 @@ test("role permissions preserve the existing mutation boundaries", () => {
   assert.equal(can("ACCOUNTS", "manageStock"), false);
   assert.equal(can("ACCOUNTS", "manageMasterData"), false);
 
+  assert.equal(can("ADMIN", "manageWorkOrders"), true);
+  assert.equal(can("ADMIN", "manageCalibrations"), true);
+  assert.equal(can("STORE_MANAGER", "manageWorkOrders"), true);
+  assert.equal(can("STORE_MANAGER", "manageCalibrations"), true);
+  assert.equal(can("ACCOUNTS", "manageWorkOrders"), false);
+  assert.equal(can("ACCOUNTS", "manageCalibrations"), false);
+
   assert.equal(can("VIEWER", "viewReports"), false);
   assert.equal(can("VIEWER", "manageStock"), false);
   assert.equal(can("VIEWER", "managePurchaseOrders"), false);
+  assert.equal(can("VIEWER", "manageWorkOrders"), false);
+  assert.equal(can("VIEWER", "manageCalibrations"), false);
 });

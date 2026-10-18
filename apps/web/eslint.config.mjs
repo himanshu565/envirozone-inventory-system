@@ -13,6 +13,13 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
   ]),
+  {
+    rules: {
+      // Documented in PROJECT_GUIDE.md §6.3: Direct client-side API fetching on mount
+      // is an accepted architecture pattern in this codebase.
+      "react-hooks/set-state-in-effect": "off",
+    },
+  },
 ]);
 
 export default eslintConfig;

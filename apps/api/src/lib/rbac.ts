@@ -6,6 +6,8 @@ export type Action =
   | "managePurchaseOrders"
   | "manageUsers"
   | "viewReports"
+  | "manageWorkOrders"
+  | "manageCalibrations"
   | "manageKnowledgeDocuments"
   | "approveKnowledgeDocuments"
   | "useKnowledgeAssistant";
@@ -17,6 +19,8 @@ const PERMISSIONS: Record<Role, Action[]> = {
     "managePurchaseOrders",
     "manageUsers",
     "viewReports",
+    "manageWorkOrders",
+    "manageCalibrations",
     "manageKnowledgeDocuments",
     "approveKnowledgeDocuments",
     "useKnowledgeAssistant",
@@ -26,6 +30,8 @@ const PERMISSIONS: Record<Role, Action[]> = {
     "manageStock",
     "managePurchaseOrders",
     "viewReports",
+    "manageWorkOrders",
+    "manageCalibrations",
     "manageKnowledgeDocuments",
     "approveKnowledgeDocuments",
     "useKnowledgeAssistant",

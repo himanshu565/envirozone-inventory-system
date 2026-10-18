@@ -225,4 +225,106 @@ router.post("/", requireAction("manageMasterData"), async (req, res) => {
   }
 });
 
+// PATCH /api/assets/:id/status - Update asset lifecycle status
+router.patch("/:id/status", requireAction("manageMasterData"), async (req, res) => {
+  const id = Number(req.params.id);
+  const status = req.body?.status as AssetStatus;
+  const currentLocationId =
+    req.body?.currentLocationId === undefined
+      ? undefined
+      : req.body.currentLocationId === null || req.body.currentLocationId === ""
+        ? null
+        : Number(req.body.currentLocationId);
+  const assignedUserId =
+    req.body?.assignedUserId === undefined
+      ? undefined
+      : req.body.assignedUserId === null || req.body.assignedUserId === ""
+        ? null
+        : Number(req.body.assignedUserId);
+  const notes = req.body?.notes !== undefined ? optionalString(req.body.notes) : undefined;
+
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid asset id" });
+    return;
+  }
+  if (!["IN_STOCK", "DEPLOYED", "UNDER_MAINTENANCE", "IN_CALIBRATION", "QUARANTINED", "RETIRED", "LOST"].includes(status)) {
+    res.status(400).json({ error: "Invalid asset status" });
+    return;
+  }
+
+  const existing = await prisma.serializedAsset.findUnique({ where: { id } });
+  if (!existing) {
+    res.status(404).json({ error: "Asset not found" });
+    return;
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const asset = await tx.serializedAsset.update({
+      where: { id },
+      data: {
+        status,
+        ...(currentLocationId !== undefined ? { currentLocationId } : {}),
+        ...(assignedUserId !== undefined ? { assignedUserId } : {}),
+        ...(notes !== undefined ? { notes } : {}),
+      },
+      include: ASSET_INCLUDE,
+    });
+
+    await recordAudit(
+      {
+        actorId: req.session!.userId,
+        action: "asset.status_change",
+        entityType: "SerializedAsset",
+        entityId: id,
+        before: assetSnapshot(existing),
+        after: assetSnapshot(asset),
+      },
+      tx
+    );
+
+    return asset;
+  });
+
+  res.json(updated);
+});
+
+// GET /api/assets/:id/history - Full asset audit and lifecycle timeline
+router.get("/:id/history", async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: "Invalid asset id" });
+    return;
+  }
+
+  const [asset, workOrders, calibrations, auditLogs] = await Promise.all([
+    prisma.serializedAsset.findUnique({ where: { id }, include: ASSET_INCLUDE }),
+    prisma.workOrder.findMany({
+      where: { assetId: id },
+      orderBy: { createdAt: "desc" },
+      include: { assignee: { select: { name: true, email: true } } },
+    }),
+    prisma.calibrationRecord.findMany({
+      where: { assetId: id },
+      orderBy: { calibrationDate: "desc" },
+    }),
+    prisma.auditLog.findMany({
+      where: { entityType: "SerializedAsset", entityId: id },
+      orderBy: { createdAt: "desc" },
+      include: { actor: { select: { name: true, email: true } } },
+    }),
+  ]);
+
+  if (!asset) {
+    res.status(404).json({ error: "Asset not found" });
+    return;
+  }
+
+  res.json({
+    asset,
+    workOrders,
+    calibrations,
+    auditLogs,
+  });
+});
+
 export default router;

@@ -18,6 +18,9 @@ import auditLogsRoutes from "./routes/audit-logs.routes";
 import assetsRoutes from "./routes/assets.routes";
 import reportsRoutes from "./routes/reports.routes";
 import knowledgeRoutes from "./routes/knowledge.routes";
+import workOrdersRoutes from "./routes/work-orders.routes";
+import calibrationsRoutes from "./routes/calibrations.routes";
+import notificationsRoutes from "./routes/notifications.routes";
 
 export const app = express();
 
@@ -64,6 +67,9 @@ app.use("/api/audit-logs", auditLogsRoutes);
 app.use("/api/assets", assetsRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/knowledge", knowledgeRoutes);
+app.use("/api/work-orders", workOrdersRoutes);
+app.use("/api/calibrations", calibrationsRoutes);
+app.use("/api/notifications", notificationsRoutes);
 
 app.use(
   (

@@ -35,6 +35,8 @@ model Item {
   purchaseOrderItems PurchaseOrderItem[]
   serializedAssets   SerializedAsset[]
   knowledgeDocuments KnowledgeDocument[]
+  workOrderParts     WorkOrderPart[]
+  maintenancePlans   MaintenancePlan[]
 }
 
 enum TrackingMode {
@@ -69,6 +71,9 @@ model User {
   assignedAssets        SerializedAsset[]
   uploadedKnowledgeDocuments KnowledgeDocument[] @relation("KnowledgeUploadedBy")
   approvedKnowledgeDocuments KnowledgeDocument[] @relation("KnowledgeApprovedBy")
+  requestedWorkOrders        WorkOrder[]         @relation("WorkOrderRequester")
+  assignedWorkOrders         WorkOrder[]         @relation("WorkOrderAssignee")
+  notifications              Notification[]
 }
 
 model Organization {
@@ -123,6 +128,8 @@ model Location {
   incoming StockTransaction[] @relation("ToLocation")
   stockBalances LocationStockBalance[]
   serializedAssets SerializedAsset[]
+  workOrders       WorkOrder[]
+  workOrderParts   WorkOrderPart[]
 }
 
 enum TransactionType {
@@ -165,6 +172,7 @@ model StockTransaction {
   @@index([purchaseOrderId])
 
   idempotencyKey StockTransactionIdempotencyKey?
+  workOrderPart  WorkOrderPart?
 }
 
 model LocationStockBalance {
@@ -210,6 +218,9 @@ model SerializedAsset {
 
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
+
+  workOrders         WorkOrder[]
+  calibrationRecords CalibrationRecord[]
 
   @@index([itemId])
   @@index([currentLocationId])
@@ -367,4 +378,143 @@ model KnowledgeChunk {
 
   @@unique([documentId, chunkIndex])
   @@index([documentId])
+}
+
+enum WorkOrderPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum WorkOrderType {
+  PREVENTIVE
+  CORRECTIVE
+  CALIBRATION
+  INSPECTION
+  INSTALLATION
+}
+
+enum WorkOrderStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  WAITING_FOR_PARTS
+  COMPLETED
+  CANCELLED
+}
+
+model WorkOrder {
+  id          Int               @id @default(autoincrement())
+  woNumber    String            @unique
+  title       String
+  description String?
+  priority    WorkOrderPriority @default(MEDIUM)
+  type        WorkOrderType     @default(CORRECTIVE)
+  status      WorkOrderStatus   @default(OPEN)
+  dueDate     DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  resolution  String?
+
+  assetId Int?
+  asset   SerializedAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+
+  locationId Int?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  requesterId Int
+  requester   User @relation("WorkOrderRequester", fields: [requesterId], references: [id])
+
+  assigneeId Int?
+  assignee   User? @relation("WorkOrderAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  parts WorkOrderPart[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([assetId])
+  @@index([assigneeId])
+}
+
+model WorkOrderPart {
+  id        Int      @id @default(autoincrement())
+  quantity  Int
+  createdAt DateTime @default(now())
+
+  workOrderId Int
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  itemId Int
+  item   Item @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  locationId Int?
+  location   Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  stockTransactionId Int?              @unique
+  stockTransaction   StockTransaction? @relation(fields: [stockTransactionId], references: [id], onDelete: SetNull)
+
+  @@index([workOrderId])
+  @@index([itemId])
+}
+
+enum CalibrationStatus {
+  PASSED
+  FAILED
+  CONDITIONAL
+}
+
+model CalibrationRecord {
+  id                Int               @id @default(autoincrement())
+  calibrationDate   DateTime          @default(now())
+  nextDueDate       DateTime
+  status            CalibrationStatus @default(PASSED)
+  certificateNumber String?
+  performedBy       String?
+  provider          String?
+  notes             String?
+
+  assetId Int
+  asset   SerializedAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([assetId])
+  @@index([nextDueDate])
+}
+
+model MaintenancePlan {
+  id           Int      @id @default(autoincrement())
+  name         String
+  description  String?
+  intervalDays Int
+  nextDueDate  DateTime
+  active       Boolean  @default(true)
+
+  itemId Int?
+  item   Item? @relation(fields: [itemId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([nextDueDate])
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      String
+  title     String
+  message   String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  userId Int
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
 }

@@ -25,8 +25,12 @@ function getAllocation(transaction: {
   if (type === "OUTWARD" && from !== null && to === null) {
     return [{ itemId, locationId: from, delta: -quantity }];
   }
-  if (type === "ADJUSTMENT" && ((from === null) !== (to === null))) {
-    return [{ itemId, locationId: to ?? from!, delta: quantity }];
+  if (type === "ADJUSTMENT") {
+    if (from !== null && to !== null && from !== to) return null;
+    const target = to ?? from;
+    if (target !== null) {
+      return [{ itemId, locationId: target, delta: quantity }];
+    }
   }
   if (type === "TRANSFER" && from !== null && to !== null && from !== to) {
     return [

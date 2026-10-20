@@ -25,7 +25,10 @@ import {
   PURCHASE_ORDER_RECEIVE_OPERATION,
   ReceiptIdempotencyConflictError,
 } from "../src/services/purchase-order-receiving.service";
-import { getLocationChanges } from "../src/services/location-stock.service";
+import {
+  applyLocationStockChanges,
+  getLocationChanges,
+} from "../src/services/location-stock.service";
 import { recordAudit } from "../src/services/audit.service";
 import { can } from "../src/lib/rbac";
 
@@ -585,4 +588,115 @@ test("Retry/serialization conflicts behave as expected in retry loop", async () 
     (err: unknown) => (err as { code?: string }).code === "P2034"
   );
   assert.equal(failAttempts, 3);
+});
+
+test("getLocationChanges defines exact balance semantics for all movement types", () => {
+  // INWARD: increases destination location when specified, empty when null
+  assert.deepEqual(getLocationChanges("INWARD", 10, null, 4), [
+    { locationId: 4, delta: 10 },
+  ]);
+  assert.deepEqual(getLocationChanges("INWARD", 10, null, null), []);
+
+  // OUTWARD: decreases source location when specified, empty when null
+  assert.deepEqual(getLocationChanges("OUTWARD", 7, 3, null), [
+    { locationId: 3, delta: -7 },
+  ]);
+  assert.deepEqual(getLocationChanges("OUTWARD", 7, null, null), []);
+
+  // ADJUSTMENT: signed change to target location via toLocationId or fromLocationId
+  assert.deepEqual(getLocationChanges("ADJUSTMENT", 5, null, 2), [
+    { locationId: 2, delta: 5 },
+  ]);
+  assert.deepEqual(getLocationChanges("ADJUSTMENT", -4, 2, null), [
+    { locationId: 2, delta: -4 },
+  ]);
+  assert.deepEqual(getLocationChanges("ADJUSTMENT", 3, 2, 2), [
+    { locationId: 2, delta: 3 },
+  ]);
+  assert.deepEqual(getLocationChanges("ADJUSTMENT", 5, null, null), []);
+  assert.throws(
+    () => getLocationChanges("ADJUSTMENT", 2, 1, 2),
+    /Adjustment cannot specify different from and to locations/
+  );
+
+  // TRANSFER: requires distinct source and destination locations
+  assert.deepEqual(getLocationChanges("TRANSFER", 6, 8, 3), [
+    { locationId: 8, delta: -6 },
+    { locationId: 3, delta: 6 },
+  ]);
+  assert.throws(
+    () => getLocationChanges("TRANSFER", 6, null, 3),
+    /Transfers require both source and destination locations/
+  );
+  assert.throws(
+    () => getLocationChanges("TRANSFER", 6, 3, null),
+    /Transfers require both source and destination locations/
+  );
+  assert.throws(
+    () => getLocationChanges("TRANSFER", 6, 3, 3),
+    /Transfer source and destination must be different/
+  );
+});
+
+test("applyLocationStockChanges acquires locks in stable ascending location order and prevents overselling", async () => {
+  const store = new Map<number, number>([
+    [10, 5],
+    [2, 3],
+  ]);
+  const lockOrder: number[] = [];
+  const updates: Array<{ locationId: number; increment: number }> = [];
+
+  const mockTx = {
+    locationStockBalance: {
+      upsert: async () => {},
+      update: async (args: {
+        where: { itemId_locationId: { itemId: number; locationId: number } };
+        data: { quantity: { increment: number } };
+      }) => {
+        const { locationId } = args.where.itemId_locationId;
+        const inc = args.data.quantity.increment;
+        updates.push({ locationId, increment: inc });
+        store.set(locationId, (store.get(locationId) ?? 0) + inc);
+      },
+    },
+    $queryRaw: async (
+      _strings: TemplateStringsArray,
+      ...values: unknown[]
+    ) => {
+      // values[0] is itemId, values[1] is locationId
+      const locationId = values[1] as number;
+      lockOrder.push(locationId);
+      return [{ quantity: store.get(locationId) ?? 0 }];
+    },
+  };
+
+  // Transfer 4 units from location 10 to location 2 (passed in reverse order)
+  await applyLocationStockChanges(
+    mockTx as unknown as Parameters<typeof applyLocationStockChanges>[0],
+    1,
+    [
+      { locationId: 10, delta: -4 },
+      { locationId: 2, delta: 4 },
+    ]
+  );
+
+  // 1. Lock ordering must be ascending [2, 10] even though location 10 was listed first
+  assert.deepEqual(lockOrder, [2, 10]);
+
+  // 2. Balances updated correctly: 10 decreased by 4 (5 -> 1), 2 increased by 4 (3 -> 7)
+  assert.equal(store.get(10), 1);
+  assert.equal(store.get(2), 7);
+
+  // 3. Prevent source location from going negative
+  lockOrder.length = 0;
+  await assert.rejects(
+    applyLocationStockChanges(
+      mockTx as unknown as Parameters<typeof applyLocationStockChanges>[0],
+      1,
+      [{ locationId: 10, delta: -2 }] // current is 1, change is -2 -> negative
+    ),
+    (err: unknown) => err instanceof InsufficientStockError
+  );
+  // Store must remain unchanged after rejected transaction
+  assert.equal(store.get(10), 1);
 });

@@ -84,8 +84,18 @@ export function getLocationChanges(
   if (type === "OUTWARD" && fromLocationId !== null) {
     return [{ locationId: fromLocationId, delta: -quantity }];
   }
-  if (type === "ADJUSTMENT" && toLocationId !== null) {
-    return [{ locationId: toLocationId, delta: quantity }];
+  if (type === "ADJUSTMENT") {
+    if (
+      fromLocationId !== null &&
+      toLocationId !== null &&
+      fromLocationId !== toLocationId
+    ) {
+      throw new Error("Adjustment cannot specify different from and to locations");
+    }
+    const target = toLocationId ?? fromLocationId;
+    if (target !== null) {
+      return [{ locationId: target, delta: quantity }];
+    }
   }
   return [];
 }

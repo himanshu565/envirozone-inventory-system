@@ -185,7 +185,7 @@ export function StockMovements({
         itemId: prev.itemId,
         type: prev.type,
       }));
-      await loadLedger(1);
+      await Promise.all([loadLedger(1), loadOptions()]);
       onRecorded();
       toast.success("Stock movement recorded");
     } catch {

@@ -3,6 +3,7 @@ import { Prisma, type TransactionType } from "@prisma/client";
 import { prisma } from "../lib/db";
 import { requireAuth, requireAction } from "../middleware/auth.middleware";
 import { getCategoryStockSummary } from "../services/stock.service";
+import { recordAudit } from "../services/audit.service";
 import {
   assertStockChangeAllowed,
   calculateCurrentStock,
@@ -18,6 +19,7 @@ import {
 } from "../lib/list-query";
 import {
   hashStockTransactionRequest,
+  IdempotencyConflictError,
   InvalidIdempotencyKeyError,
   parseIdempotencyKey,
   STOCK_TRANSACTION_OPERATION,
@@ -207,6 +209,29 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
     try {
       transaction = await prisma.$transaction(
         async (tx) => {
+          if (idempotencyKey && requestHash) {
+            const existing = await tx.stockTransactionIdempotencyKey.findUnique({
+              where: {
+                actorId_operation_key: {
+                  actorId: req.session!.userId,
+                  operation: STOCK_TRANSACTION_OPERATION,
+                  key: idempotencyKey,
+                },
+              },
+              include: {
+                stockTransaction: { include: TRANSACTION_INCLUDE },
+              },
+            });
+
+            if (existing) {
+              if (existing.requestHash !== requestHash) {
+                throw new IdempotencyConflictError();
+              }
+              replayed = true;
+              return existing.stockTransaction;
+            }
+          }
+
           const stockTotals = await tx.stockTransaction.groupBy({
             by: ["type"],
             where: { itemId },
@@ -234,8 +259,8 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
           });
 
           // Keep the audit record atomic with the stock transaction.
-          await tx.auditLog.create({
-            data: {
+          await recordAudit(
+            {
               actorId: req.session!.userId,
               action: "stock.transaction.create",
               entityType: "StockTransaction",
@@ -250,7 +275,8 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
                 toLocationId: created.toLocationId,
               },
             },
-          });
+            tx
+          );
 
           if (idempotencyKey && requestHash) {
             await tx.stockTransactionIdempotencyKey.create({
@@ -270,6 +296,11 @@ router.post("/transactions", requireAction("manageStock"), async (req, res) => {
       );
       break;
     } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+
       if (error instanceof InsufficientStockError) {
         res.status(409).json({ error: error.message });
         return;

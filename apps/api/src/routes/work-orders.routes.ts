@@ -274,90 +274,99 @@ router.post("/:id/parts", requireAction("manageStock"), async (req, res) => {
     return;
   }
 
-  try {
-    const result = await prisma.$transaction(
-      async (tx) => {
-        // 1. Verify global ledger stock
-        const stockTotals = await tx.stockTransaction.groupBy({
-          by: ["type"],
-          where: { itemId },
-          _sum: { quantity: true },
-        });
-        const currentStock = calculateCurrentStock(stockTotals);
-        assertStockChangeAllowed(currentStock, "OUTWARD", quantity);
+  let result;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      result = await prisma.$transaction(
+        async (tx) => {
+          // 1. Verify global ledger stock
+          const stockTotals = await tx.stockTransaction.groupBy({
+            by: ["type"],
+            where: { itemId },
+            _sum: { quantity: true },
+          });
+          const currentStock = calculateCurrentStock(stockTotals);
+          assertStockChangeAllowed(currentStock, "OUTWARD", quantity);
 
-        // 2. Decrement location balance if location is specified
-        if (locationId !== null) {
-          await applyLocationStockChanges(tx, itemId, [
-            { locationId, delta: -quantity },
-          ]);
-        }
+          // 2. Decrement location balance if location is specified
+          if (locationId !== null) {
+            await applyLocationStockChanges(tx, itemId, [
+              { locationId, delta: -quantity },
+            ]);
+          }
 
-        // 3. Create stock movement row
-        const stockTx = await tx.stockTransaction.create({
-          data: {
-            type: "OUTWARD",
-            quantity,
-            itemId,
-            fromLocationId: locationId,
-            referenceNumber: workOrder.woNumber,
-            remarks: `Parts consumed for Work Order ${workOrder.woNumber}: ${workOrder.title}`,
-            createdById: req.session!.userId,
-          },
-        });
+          // 3. Create stock movement row
+          const stockTx = await tx.stockTransaction.create({
+            data: {
+              type: "OUTWARD",
+              quantity,
+              itemId,
+              fromLocationId: locationId,
+              referenceNumber: workOrder.woNumber,
+              remarks: `Parts consumed for Work Order ${workOrder.woNumber}: ${workOrder.title}`,
+              createdById: req.session!.userId,
+            },
+          });
 
-        // 4. Record work order part line
-        const part = await tx.workOrderPart.create({
-          data: {
-            workOrderId: id,
-            itemId,
-            locationId,
-            quantity,
-            stockTransactionId: stockTx.id,
-          },
-          include: {
-            item: { select: { id: true, itemCode: true, name: true, unit: true } },
-            location: { select: { id: true, name: true } },
-          },
-        });
-
-        // 5. Audit record
-        await recordAudit(
-          {
-            actorId: req.session!.userId,
-            action: "work_order.part_consumed",
-            entityType: "WorkOrderPart",
-            entityId: part.id,
-            after: {
+          // 4. Record work order part line
+          const part = await tx.workOrderPart.create({
+            data: {
               workOrderId: id,
               itemId,
-              quantity,
               locationId,
+              quantity,
               stockTransactionId: stockTx.id,
             },
-          },
-          tx
-        );
+            include: {
+              item: { select: { id: true, itemCode: true, name: true, unit: true } },
+              location: { select: { id: true, name: true } },
+            },
+          });
 
-        return part;
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-    );
+          // 5. Audit record
+          await recordAudit(
+            {
+              actorId: req.session!.userId,
+              action: "work_order.part_consumed",
+              entityType: "WorkOrderPart",
+              entityId: part.id,
+              after: {
+                workOrderId: id,
+                itemId,
+                quantity,
+                locationId,
+                stockTransactionId: stockTx.id,
+              },
+            },
+            tx
+          );
 
-    res.status(201).json(result);
-  } catch (error) {
-    if (error instanceof InsufficientStockError) {
-      res.status(409).json({ error: error.message });
-      return;
+          return part;
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+      break;
+    } catch (error) {
+      if (error instanceof InsufficientStockError) {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+      const isSerializationConflict =
+        error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
+      if (isSerializationConflict && attempt < 2) continue;
+      if (isSerializationConflict) {
+        res.status(409).json({ error: "Stock changed concurrently. Please retry." });
+        return;
+      }
+      throw error;
     }
-    const isSerializationConflict =
-      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034";
-    if (isSerializationConflict) {
-      res.status(409).json({ error: "Stock changed concurrently. Please retry." });
-      return;
-    }
-    throw error;
   }
+
+  if (!result) {
+    throw new Error("Work order part consumption completed without a result");
+  }
+
+  res.status(201).json(result);
 });
 
 export default router;

@@ -7,6 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "prisma generate && tsc",
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/stock-ledger.test.ts test/reports.test.ts test/authorization.test.ts",
+    "test:authorization": "node --import tsx --test test/authorization.test.ts",
     "test:stock-ledger": "node --import tsx --test test/stock-ledger.test.ts",
     "test:reports": "node --import tsx --test test/reports.test.ts",
     "test:stock-ledger:integration": "node --import tsx --test test/stock-ledger.integration.test.ts",

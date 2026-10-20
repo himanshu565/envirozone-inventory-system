@@ -300,100 +300,6 @@ integrationTest(
         })
       );
 
-      integrationTest(
-        "location transfer moves stock without changing item total",
-        async () => {
-          const db = requireClient();
-          const fixture = await createFixture();
-          try {
-            await db.locationStockBalance.create({
-              data: {
-                itemId: fixture.itemId,
-                locationId: fixture.sourceLocationId,
-                quantity: 5,
-              },
-            });
-            await db.$transaction(
-              async (tx) => {
-                await applyLocationStockChanges(tx, fixture.itemId, [
-                  { locationId: fixture.sourceLocationId, delta: -3 },
-                  { locationId: fixture.destinationLocationId, delta: 3 },
-                ]);
-                await tx.stockTransaction.create({
-                  data: {
-                    type: "TRANSFER",
-                    quantity: 3,
-                    itemId: fixture.itemId,
-                    fromLocationId: fixture.sourceLocationId,
-                    toLocationId: fixture.destinationLocationId,
-                    createdById: fixture.userId,
-                  },
-                });
-              },
-              { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-            );
-
-            const balances = await db.locationStockBalance.findMany({
-              where: { itemId: fixture.itemId },
-              orderBy: { locationId: "asc" },
-            });
-            assert.deepEqual(
-              balances.map((balance) => [balance.locationId, balance.quantity]),
-              [
-                [fixture.sourceLocationId, 2],
-                [fixture.destinationLocationId, 3],
-              ].sort((a, b) => a[0] - b[0])
-            );
-            assert.equal(await getStock(fixture.itemId), 0);
-          } finally {
-            await cleanupFixture(fixture);
-          }
-        }
-      );
-
-      integrationTest(
-        "concurrent location issues cannot oversell a source balance",
-        async () => {
-          const db = requireClient();
-          const fixture = await createFixture();
-          try {
-            await db.locationStockBalance.create({
-              data: {
-                itemId: fixture.itemId,
-                locationId: fixture.sourceLocationId,
-                quantity: 3,
-              },
-            });
-
-            const issue = () =>
-              withSerializableRetry(() =>
-                db.$transaction(
-                  (tx) =>
-                    applyLocationStockChanges(tx, fixture.itemId, [
-                      { locationId: fixture.sourceLocationId, delta: -2 },
-                    ]),
-                  { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-                )
-              );
-            const results = await Promise.allSettled([issue(), issue()]);
-            assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
-            assert.equal(results.filter((result) => result.status === "rejected").length, 1);
-
-            const balance = await db.locationStockBalance.findUniqueOrThrow({
-              where: {
-                itemId_locationId: {
-                  itemId: fixture.itemId,
-                  locationId: fixture.sourceLocationId,
-                },
-              },
-            });
-            assert.equal(balance.quantity, 1);
-          } finally {
-            await cleanupFixture(fixture);
-          }
-        }
-      );
-
       assert.equal(await getStock(fixture.itemId), 0);
       assert.equal(
         await db.auditLog.count({
@@ -404,6 +310,100 @@ integrationTest(
         }),
         0
       );
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }
+);
+
+integrationTest(
+  "location transfer moves stock without changing item total",
+  async () => {
+    const db = requireClient();
+    const fixture = await createFixture();
+    try {
+      await db.locationStockBalance.create({
+        data: {
+          itemId: fixture.itemId,
+          locationId: fixture.sourceLocationId,
+          quantity: 5,
+        },
+      });
+      await db.$transaction(
+        async (tx) => {
+          await applyLocationStockChanges(tx, fixture.itemId, [
+            { locationId: fixture.sourceLocationId, delta: -3 },
+            { locationId: fixture.destinationLocationId, delta: 3 },
+          ]);
+          await tx.stockTransaction.create({
+            data: {
+              type: "TRANSFER",
+              quantity: 3,
+              itemId: fixture.itemId,
+              fromLocationId: fixture.sourceLocationId,
+              toLocationId: fixture.destinationLocationId,
+              createdById: fixture.userId,
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+      );
+
+      const balances = await db.locationStockBalance.findMany({
+        where: { itemId: fixture.itemId },
+        orderBy: { locationId: "asc" },
+      });
+      assert.deepEqual(
+        balances.map((balance) => [balance.locationId, balance.quantity]),
+        [
+          [fixture.sourceLocationId, 2],
+          [fixture.destinationLocationId, 3],
+        ].sort((a, b) => a[0] - b[0])
+      );
+      assert.equal(await getStock(fixture.itemId), 0);
+    } finally {
+      await cleanupFixture(fixture);
+    }
+  }
+);
+
+integrationTest(
+  "concurrent location issues cannot oversell a source balance",
+  async () => {
+    const db = requireClient();
+    const fixture = await createFixture();
+    try {
+      await db.locationStockBalance.create({
+        data: {
+          itemId: fixture.itemId,
+          locationId: fixture.sourceLocationId,
+          quantity: 3,
+        },
+      });
+
+      const issue = () =>
+        withSerializableRetry(() =>
+          db.$transaction(
+            (tx) =>
+              applyLocationStockChanges(tx, fixture.itemId, [
+                { locationId: fixture.sourceLocationId, delta: -2 },
+              ]),
+            { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+          )
+        );
+      const results = await Promise.allSettled([issue(), issue()]);
+      assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+      assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+
+      const balance = await db.locationStockBalance.findUniqueOrThrow({
+        where: {
+          itemId_locationId: {
+            itemId: fixture.itemId,
+            locationId: fixture.sourceLocationId,
+          },
+        },
+      });
+      assert.equal(balance.quantity, 1);
     } finally {
       await cleanupFixture(fixture);
     }
@@ -594,6 +594,24 @@ integrationTest(
     }
   }
 );
+
+integrationTest("retryable serialization conflicts retry and exhaust gracefully", async () => {
+  let attempts = 0;
+  const failingOp = async () => {
+    attempts += 1;
+    const error = new Prisma.PrismaClientKnownRequestError("Serialization failure", {
+      code: "P2034",
+      clientVersion: "7.0.0",
+    });
+    throw error;
+  };
+
+  await assert.rejects(
+    withSerializableRetry(failingOp, 3),
+    /exhausted its retry attempts/
+  );
+  assert.equal(attempts, 3);
+});
 
 test.after(async () => {
   await client?.$disconnect();

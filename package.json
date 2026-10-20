@@ -16,7 +16,8 @@
     "start:web": "npm run start -w apps/web",
     "start:api": "npm run start -w apps/api",
     "migrate:deploy": "npm run migrate:deploy -w apps/api",
-    "seed": "npm run seed -w apps/api"
+    "seed": "npm run seed -w apps/api",
+    "test": "npm run test -w apps/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

@@ -12,6 +12,13 @@ export class InvalidIdempotencyKeyError extends Error {
   }
 }
 
+export class IdempotencyConflictError extends Error {
+  constructor() {
+    super("Idempotency-Key was already used with a different request");
+    this.name = "IdempotencyConflictError";
+  }
+}
+
 export type StockTransactionRequest = {
   type: TransactionType;
   itemId: number;

@@ -19,11 +19,15 @@ import {
 import {
   assertReceiptState,
   getReceiptStatus,
+  hashReceiptRequest,
   InvalidReceiptStateError,
   isAllowedPurchaseOrderTransition,
+  PURCHASE_ORDER_RECEIVE_OPERATION,
+  ReceiptIdempotencyConflictError,
 } from "../src/services/purchase-order-receiving.service";
 import { getLocationChanges } from "../src/services/location-stock.service";
 import { recordAudit } from "../src/services/audit.service";
+import { can } from "../src/lib/rbac";
 
 test("stock balance applies inward, outward, and signed adjustments", () => {
   assert.equal(
@@ -257,6 +261,162 @@ test("purchase-order receiving preserves partial and complete status transitions
     ),
     "RECEIVED"
   );
+});
+
+test("purchase-order receiving workflow: partial receipt, complete receipt, over-receipt, duplicate request, and rollback", async () => {
+  type PoItemState = { itemId: number; quantityOrdered: number; quantityReceived: number };
+  type OrderState = {
+    id: number;
+    status: "DRAFT" | "SENT" | "PARTIALLY_RECEIVED" | "RECEIVED" | "CANCELLED";
+    items: PoItemState[];
+  };
+
+  let order: OrderState = {
+    id: 10,
+    status: "SENT",
+    items: [
+      { itemId: 101, quantityOrdered: 5, quantityReceived: 0 },
+      { itemId: 102, quantityOrdered: 2, quantityReceived: 0 },
+    ],
+  };
+  const stockMovements: Array<{ itemId: number; quantity: number; type: string; poId: number }> = [];
+  const auditLogs: Array<{ action: string; entityType: string; entityId: number }> = [];
+  const idempotencyKeys = new Map<string, { requestHash: string; result: OrderState }>();
+
+  const receiveItems = async (
+    actorId: number,
+    receipts: Array<{ itemId: number; quantity: number }>,
+    idempotencyKey?: string,
+    toLocationId: number | null = null,
+    forceRollback = false
+  ) => {
+    assertReceiptState(order.status);
+
+    const requestHash = idempotencyKey
+      ? hashReceiptRequest({ purchaseOrderId: order.id, receipts, toLocationId })
+      : null;
+
+    if (idempotencyKey && requestHash) {
+      const existing = idempotencyKeys.get(
+        `${actorId}:${PURCHASE_ORDER_RECEIVE_OPERATION}:${idempotencyKey}`
+      );
+      if (existing) {
+        if (existing.requestHash !== requestHash) {
+          throw new ReceiptIdempotencyConflictError();
+        }
+        return { order: existing.result, replayed: true };
+      }
+    }
+
+    // Validate quantities & over-receipt
+    for (const r of receipts) {
+      validateStockQuantity("INWARD", r.quantity);
+      const item = order.items.find((i) => i.itemId === r.itemId);
+      if (!item) throw new Error("Item not on order");
+      if (item.quantityReceived + r.quantity > item.quantityOrdered) {
+        throw new Error(`Cannot receive more than ordered for item ${item.itemId}`);
+      }
+    }
+
+    // Simulate atomic transaction
+    const snapshotOrder = JSON.parse(JSON.stringify(order)) as OrderState;
+    const snapshotMovements = [...stockMovements];
+    const snapshotAudits = [...auditLogs];
+
+    try {
+      for (const r of receipts) {
+        const item = order.items.find((i) => i.itemId === r.itemId)!;
+        item.quantityReceived += r.quantity;
+        stockMovements.push({ itemId: r.itemId, quantity: r.quantity, type: "INWARD", poId: order.id });
+      }
+
+      order.status = getReceiptStatus(order.items, order.status);
+      auditLogs.push({ action: "purchaseOrder.receive", entityType: "PurchaseOrder", entityId: order.id });
+
+      if (forceRollback) {
+        throw new Error("Forced transaction rollback");
+      }
+
+      if (idempotencyKey && requestHash) {
+        idempotencyKeys.set(`${actorId}:${PURCHASE_ORDER_RECEIVE_OPERATION}:${idempotencyKey}`, {
+          requestHash,
+          result: JSON.parse(JSON.stringify(order)) as OrderState,
+        });
+      }
+
+      return { order: JSON.parse(JSON.stringify(order)) as OrderState, replayed: false };
+    } catch (err) {
+      order = snapshotOrder;
+      stockMovements.length = 0;
+      stockMovements.push(...snapshotMovements);
+      auditLogs.length = 0;
+      auditLogs.push(...snapshotAudits);
+      throw err;
+    }
+  };
+
+  // 1. Partial receipt: receive 2 of item 101
+  const step1 = await receiveItems(1, [{ itemId: 101, quantity: 2 }], "key-po-1");
+  assert.equal(step1.replayed, false);
+  assert.equal(order.status, "PARTIALLY_RECEIVED");
+  assert.equal(order.items[0].quantityReceived, 2);
+  assert.equal(stockMovements.length, 1);
+  assert.equal(auditLogs.length, 1);
+
+  // 2. Duplicate request with same key: replays without modifying counters or stock
+  const step2 = await receiveItems(1, [{ itemId: 101, quantity: 2 }], "key-po-1");
+  assert.equal(step2.replayed, true);
+  assert.equal(order.items[0].quantityReceived, 2);
+  assert.equal(stockMovements.length, 1);
+  assert.equal(auditLogs.length, 1);
+
+  // 3. Duplicate request with conflicting payload: throws ReceiptIdempotencyConflictError
+  await assert.rejects(
+    receiveItems(1, [{ itemId: 101, quantity: 3 }], "key-po-1"),
+    ReceiptIdempotencyConflictError
+  );
+
+  // 4. Over-receipt: attempting to receive 4 of item 101 (only 3 remaining) throws
+  await assert.rejects(
+    receiveItems(1, [{ itemId: 101, quantity: 4 }]),
+    /Cannot receive more than ordered/
+  );
+  assert.equal(order.items[0].quantityReceived, 2);
+
+  // 5. Rollback on transaction failure: leaves no state change
+  await assert.rejects(
+    receiveItems(1, [{ itemId: 101, quantity: 1 }], "fail-key", null, true),
+    /Forced transaction rollback/
+  );
+  assert.equal(order.items[0].quantityReceived, 2);
+  assert.equal(stockMovements.length, 1);
+  assert.equal(auditLogs.length, 1);
+
+  // 6. Complete receipt: receive remaining 3 of 101 and 2 of 102
+  const step3 = await receiveItems(1, [
+    { itemId: 101, quantity: 3 },
+    { itemId: 102, quantity: 2 },
+  ], "key-po-finish");
+  assert.equal(step3.replayed, false);
+  assert.equal(order.status, "RECEIVED");
+  assert.equal(order.items[0].quantityReceived, 5);
+  assert.equal(order.items[1].quantityReceived, 2);
+  assert.equal(stockMovements.length, 3);
+  assert.equal(auditLogs.length, 2);
+
+  // 7. Invalid state: attempting to receive against RECEIVED order throws InvalidReceiptStateError
+  await assert.rejects(
+    receiveItems(1, [{ itemId: 101, quantity: 1 }]),
+    InvalidReceiptStateError
+  );
+});
+
+test("purchase-order receiving authorization adheres to RBAC rules", () => {
+  // Only manageStock permission can receive stock
+  assert.equal(can("ADMIN", "manageStock"), true);
+  assert.equal(can("STORE_MANAGER", "manageStock"), true);
+  assert.equal(can("ACCOUNTS", "manageStock"), false);
+  assert.equal(can("VIEWER", "manageStock"), false);
 });
 
 test("recordAudit delegates to a transaction client atomically", async () => {

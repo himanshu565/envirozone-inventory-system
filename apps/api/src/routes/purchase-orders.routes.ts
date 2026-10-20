@@ -331,6 +331,16 @@ router.post("/:id/receive", requireAction("manageStock"), async (req, res) => {
     return;
   }
 
+  try {
+    assertReceiptState(order.status);
+  } catch (error) {
+    if (error instanceof InvalidReceiptStateError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    throw error;
+  }
+
   const rawReceipts = Array.isArray(req.body?.receipts) ? req.body.receipts : [];
   if (rawReceipts.length === 0) {
     res.status(400).json({ error: "At least one receipt line is required" });

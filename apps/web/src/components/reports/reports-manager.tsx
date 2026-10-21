@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, AlertTriangle, CheckCircle, Package, ArrowUpRight } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle, Package, ArrowUpRight, ShoppingCart, Cpu, Clock } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/skeleton";
@@ -38,8 +38,41 @@ type LocationBalanceItem = {
   minimumStock: number;
 };
 
+type PurchaseOrderProgressItem = {
+  id: number;
+  poNumber: string;
+  orderDate: string;
+  status: string;
+  supplier: { id: number; name: string };
+  orderedQuantity: number;
+  receivedQuantity: number;
+  remainingQuantity: number;
+  receiptProgressPercent: number;
+};
+
+type AssetStatusCount = {
+  status: string;
+  count: number;
+};
+
+type DueCalibrationAsset = {
+  assetId: number;
+  assetTag: string;
+  serialNumber: string | null;
+  status: string;
+  itemName: string;
+  itemCode: string;
+  locationName: string;
+  lastCalibrated: string | null;
+  nextDueDate: string | null;
+  latestStatus: string | null;
+  isOverdue: boolean;
+  isDueSoon: boolean;
+  isUncalibrated: boolean;
+};
+
 export function ReportsManager() {
-  const [activeTab, setActiveTab] = useState<"stock" | "movements" | "locations">("stock");
+  const [activeTab, setActiveTab] = useState<"stock" | "movements" | "locations" | "purchaseOrders" | "assets">("stock");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -51,9 +84,19 @@ export function ReportsManager() {
   // Movements state
   const [movements, setMovements] = useState<MovementReportItem[]>([]);
   const [movementTotals, setMovementTotals] = useState({ inward: 0, outward: 0, adjustment: 0, transfer: 0 });
+  const [movementType, setMovementType] = useState<string>("");
+  const [movementFromDate, setMovementFromDate] = useState<string>("");
+  const [movementToDate, setMovementToDate] = useState<string>("");
 
   // Location balances state
   const [locationBalances, setLocationBalances] = useState<LocationBalanceItem[]>([]);
+
+  // Purchase orders progress state
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrderProgressItem[]>([]);
+
+  // Assets and calibrations state
+  const [assetStatuses, setAssetStatuses] = useState<AssetStatusCount[]>([]);
+  const [dueCalibrations, setDueCalibrations] = useState<DueCalibrationAsset[]>([]);
 
   const loadStockReport = useCallback(async () => {
     setLoading(true);
@@ -80,7 +123,12 @@ export function ReportsManager() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/reports/stock/movements?pageSize=50`, {
+      const params = new URLSearchParams({ pageSize: "50" });
+      if (movementType) params.set("type", movementType);
+      if (movementFromDate) params.set("from", new Date(movementFromDate).toISOString());
+      if (movementToDate) params.set("to", new Date(movementToDate).toISOString());
+
+      const res = await fetch(`${API_URL}/api/reports/stock/movements?${params.toString()}`, {
         credentials: "include",
       });
       if (!res.ok) throw new Error("Failed to load movements report");
@@ -92,7 +140,7 @@ export function ReportsManager() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [movementType, movementFromDate, movementToDate]);
 
   const loadLocationsReport = useCallback(async () => {
     setLoading(true);
@@ -111,11 +159,47 @@ export function ReportsManager() {
     }
   }, []);
 
+  const loadPurchaseOrdersReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/reports/purchase-orders/progress?pageSize=50`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to load purchase orders progress");
+      const data = await res.json();
+      setPurchaseOrders(data.data || []);
+    } catch {
+      setError("Unable to load purchase order report");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadAssetsReport = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [statusRes, dueRes] = await Promise.all([
+        fetch(`${API_URL}/api/reports/assets/status`, { credentials: "include" }),
+        fetch(`${API_URL}/api/calibrations/due`, { credentials: "include" }),
+      ]);
+      if (statusRes.ok) setAssetStatuses(await statusRes.json());
+      if (dueRes.ok) setDueCalibrations(await dueRes.json());
+    } catch {
+      setError("Unable to load asset & calibration reports");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab === "stock") loadStockReport();
     else if (activeTab === "movements") loadMovementsReport();
     else if (activeTab === "locations") loadLocationsReport();
-  }, [activeTab, loadStockReport, loadMovementsReport, loadLocationsReport]);
+    else if (activeTab === "purchaseOrders") loadPurchaseOrdersReport();
+    else if (activeTab === "assets") loadAssetsReport();
+  }, [activeTab, loadStockReport, loadMovementsReport, loadLocationsReport, loadPurchaseOrdersReport, loadAssetsReport]);
 
   const healthyCount = stockItems.filter((i) => i.status === "HEALTHY").length;
   const lowStockCount = stockItems.filter((i) => i.status === "LOW_STOCK").length;
@@ -133,7 +217,7 @@ export function ReportsManager() {
         </div>
         <div className="flex items-center gap-2">
           <a
-            href={`${API_URL}/api/reports/stock/movements.csv`}
+            href={`${API_URL}/api/reports/stock/movements.csv${movementType ? `?type=${movementType}` : ""}`}
             download="stock-movements.csv"
             className="flex items-center gap-1.5 rounded-lg border border-[#0f3d35] bg-[#0f3d35] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#155449]"
           >
@@ -144,7 +228,7 @@ export function ReportsManager() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-slate-200 pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
           type="button"
           onClick={() => setActiveTab("stock")}
@@ -177,6 +261,28 @@ export function ReportsManager() {
           }`}
         >
           Location Stock Balances
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("purchaseOrders")}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            activeTab === "purchaseOrders"
+              ? "bg-[#0f3d35] text-white"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          PO Receipt Progress
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("assets")}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+            activeTab === "assets"
+              ? "bg-[#0f3d35] text-white"
+              : "text-slate-600 hover:bg-slate-100"
+          }`}
+        >
+          Asset Status & Calibrations
         </button>
       </div>
 
@@ -295,6 +401,55 @@ export function ReportsManager() {
       {/* Tab 2: Movements & Reconciliations */}
       {activeTab === "movements" && (
         <div className="space-y-4">
+          {/* Movement Filters */}
+          <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-slate-600">Type:</span>
+              <select
+                value={movementType}
+                onChange={(e) => setMovementType(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-[#0f3d35] focus:outline-none"
+              >
+                <option value="">All Types</option>
+                <option value="INWARD">INWARD</option>
+                <option value="OUTWARD">OUTWARD</option>
+                <option value="ADJUSTMENT">ADJUSTMENT</option>
+                <option value="TRANSFER">TRANSFER</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-slate-600">From:</span>
+              <input
+                type="date"
+                value={movementFromDate}
+                onChange={(e) => setMovementFromDate(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-[#0f3d35] focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="font-medium text-slate-600">To:</span>
+              <input
+                type="date"
+                value={movementToDate}
+                onChange={(e) => setMovementToDate(e.target.value)}
+                className="rounded border border-slate-300 px-2 py-1 text-xs focus:border-[#0f3d35] focus:outline-none"
+              />
+            </div>
+            {(movementType || movementFromDate || movementToDate) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMovementType("");
+                  setMovementFromDate("");
+                  setMovementToDate("");
+                }}
+                className="ml-auto text-xs text-rose-600 hover:underline"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="rounded-xl border border-slate-200 bg-white p-3.5 shadow-sm">
               <span className="text-[11px] font-medium text-slate-500">Total Inward Units</span>
@@ -317,7 +472,7 @@ export function ReportsManager() {
           {loading ? (
             <TableSkeleton cols={6} rows={6} />
           ) : movements.length === 0 ? (
-            <EmptyState icon={ArrowUpRight} title="No movements found" description="No movements recorded." />
+            <EmptyState icon={ArrowUpRight} title="No movements found" description="No movements recorded for the selected criteria." />
           ) : (
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
               <div className="overflow-x-auto">
@@ -404,6 +559,147 @@ export function ReportsManager() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Tab 4: Purchase Orders Progress */}
+      {activeTab === "purchaseOrders" && (
+        <div className="space-y-4">
+          {loading ? (
+            <TableSkeleton cols={6} rows={6} />
+          ) : purchaseOrders.length === 0 ? (
+            <EmptyState icon={ShoppingCart} title="No purchase orders found" description="No purchase orders to display." />
+          ) : (
+            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-4 py-3">PO Number</th>
+                      <th className="px-4 py-3">Supplier</th>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Ordered</th>
+                      <th className="px-4 py-3 text-right">Received</th>
+                      <th className="px-4 py-3 text-right">Remaining</th>
+                      <th className="px-4 py-3 text-center w-36">Fulfillment Progress</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchaseOrders.map((po) => (
+                      <tr key={po.id} className="hover:bg-slate-50/70 transition">
+                        <td className="px-4 py-3 font-mono font-bold text-[#0f3d35]">{po.poNumber}</td>
+                        <td className="px-4 py-3 font-medium text-slate-900">{po.supplier.name}</td>
+                        <td className="px-4 py-3 text-slate-500">{new Date(po.orderDate).toLocaleDateString()}</td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${
+                              po.status === "RECEIVED"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : po.status === "PARTIALLY_RECEIVED"
+                                  ? "bg-amber-100 text-amber-800"
+                                  : po.status === "CANCELLED"
+                                    ? "bg-slate-100 text-slate-600"
+                                    : "bg-blue-100 text-blue-800"
+                            }`}
+                          >
+                            {po.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-900">{po.orderedQuantity}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-emerald-700">+{po.receivedQuantity}</td>
+                        <td className="px-4 py-3 text-right font-semibold text-slate-500">{po.remainingQuantity}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-[#0f3d35] rounded-full transition-all"
+                                style={{ width: `${Math.min(100, Math.max(0, po.receiptProgressPercent))}%` }}
+                              />
+                            </div>
+                            <span className="font-mono text-[10px] font-bold text-slate-600 w-8 text-right">
+                              {po.receiptProgressPercent}%
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 5: Assets & Maintenance Due */}
+      {activeTab === "assets" && (
+        <div className="space-y-4">
+          {/* Status Breakdown Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {assetStatuses.map((s) => (
+              <div key={s.status} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm text-center">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">
+                  {s.status.replace("_", " ")}
+                </span>
+                <p className="mt-1 text-lg font-bold text-slate-900">{s.count}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Overdue / Due Soon Table */}
+          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5 mb-3">
+              <Clock className="h-4 w-4 text-amber-600" />
+              Calibration Due Schedule (Next 30 Days & Overdue)
+            </h3>
+            {dueCalibrations.length === 0 ? (
+              <p className="text-xs text-slate-400 py-3">No instruments currently due or overdue for calibration.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-100 bg-slate-50 text-[11px] font-semibold text-slate-600 uppercase tracking-wider">
+                    <tr>
+                      <th className="px-4 py-2.5">Asset Tag</th>
+                      <th className="px-4 py-2.5">Equipment Name</th>
+                      <th className="px-4 py-2.5">Location</th>
+                      <th className="px-4 py-2.5">Last Calibrated</th>
+                      <th className="px-4 py-2.5">Next Due</th>
+                      <th className="px-4 py-2.5 text-center">Urgency</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {dueCalibrations.map((a) => (
+                      <tr key={a.assetId} className="hover:bg-slate-50/70 transition">
+                        <td className="px-4 py-2.5 font-mono font-bold text-[#0f3d35]">{a.assetTag}</td>
+                        <td className="px-4 py-2.5 font-medium text-slate-900">{a.itemName}</td>
+                        <td className="px-4 py-2.5 text-slate-500">{a.locationName}</td>
+                        <td className="px-4 py-2.5 text-slate-500">
+                          {a.lastCalibrated ? new Date(a.lastCalibrated).toLocaleDateString() : "Never"}
+                        </td>
+                        <td className="px-4 py-2.5 font-semibold text-slate-800">
+                          {a.nextDueDate ? new Date(a.nextDueDate).toLocaleDateString() : "Immediate"}
+                        </td>
+                        <td className="px-4 py-2.5 text-center">
+                          <span
+                            className={`inline-flex items-center rounded px-2 py-0.5 text-[10px] font-bold ${
+                              a.isOverdue
+                                ? "bg-rose-100 text-rose-800"
+                                : a.isUncalibrated
+                                  ? "bg-purple-100 text-purple-800"
+                                  : "bg-amber-100 text-amber-800"
+                            }`}
+                          >
+                            {a.isOverdue ? "OVERDUE" : a.isUncalibrated ? "UNCALIBRATED" : "DUE SOON"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

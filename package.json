@@ -18,7 +18,10 @@
     "migrate:deploy": "npm run migrate:deploy -w apps/api",
     "seed": "npm run seed -w apps/api",
     "stock:locations:backfill": "npm run stock:locations:backfill -w apps/api",
-    "test": "npm run test -w apps/api"
+    "typecheck": "npm run typecheck -w apps/api",
+    "lint": "npm run lint -w apps/web",
+    "test": "npm run test -w apps/api",
+    "test:integration": "npm run test:stock-ledger:integration -w apps/api && npm run test:purchase-order-receiving:integration -w apps/api && npm run test:serialized-assets:integration -w apps/api"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

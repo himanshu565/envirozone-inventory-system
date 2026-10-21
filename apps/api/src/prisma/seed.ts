@@ -3,13 +3,17 @@ import { prisma } from "../lib/db";
 import { hashPassword } from "../lib/password";
 
 async function main() {
-  if (
-    process.env.NODE_ENV === "production" &&
-    (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD)
-  ) {
-    throw new Error(
-      "Production seeding requires explicit ADMIN_EMAIL and ADMIN_PASSWORD"
-    );
+  if (process.env.NODE_ENV === "production") {
+    if (process.env.ALLOW_PRODUCTION_SEED !== "YES") {
+      throw new Error(
+        "Refusing to run seed in production without ALLOW_PRODUCTION_SEED=YES"
+      );
+    }
+    if (!process.env.ADMIN_EMAIL || !process.env.ADMIN_PASSWORD) {
+      throw new Error(
+        "Production seeding requires explicit ADMIN_EMAIL and ADMIN_PASSWORD"
+      );
+    }
   }
 
   const email = process.env.ADMIN_EMAIL ?? "admin@envirozone.local";

@@ -9,9 +9,24 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: envirozone
+          POSTGRES_PASSWORD: envirozone_ci
+          POSTGRES_DB: envirozone_ci
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
     env:
       DATABASE_URL: postgresql://envirozone:envirozone_ci@localhost:5433/envirozone_ci
-      JWT_SECRET: ci-only-not-a-secret
+      STOCK_TEST_DATABASE_URL: postgresql://envirozone:envirozone_ci@localhost:5433/envirozone_test
+      JWT_SECRET: ci-only-not-a-secret-minimum-32-chars-long
       WEB_ORIGIN: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
@@ -23,8 +38,11 @@ jobs:
       - run: npx prisma validate --config apps/api/prisma.config.ts
       - run: npm run typecheck -w apps/api
       - run: npm run lint -w apps/web
-      - run: npm run test:stock-ledger -w apps/api
-      - run: npm run test:reports -w apps/api
+      - run: npm test -w apps/api
+      - name: Prepare disposable test database
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U envirozone -d envirozone_ci -c "CREATE DATABASE envirozone_test;"
+          DATABASE_URL="$STOCK_TEST_DATABASE_URL" npx prisma migrate deploy --config apps/api/prisma.config.ts
       - run: npm run test:stock-ledger:integration -w apps/api
       - run: npm run test:purchase-order-receiving:integration -w apps/api
       - run: npm run test:serialized-assets:integration -w apps/api

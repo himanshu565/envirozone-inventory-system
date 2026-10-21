@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Download, AlertTriangle, CheckCircle, Package, ArrowUpRight, ShoppingCart, Cpu, Clock } from "lucide-react";
+import { Download, AlertTriangle, CheckCircle, Package, ArrowUpRight, ShoppingCart, Clock } from "lucide-react";
 import { API_URL } from "@/lib/api";
 import { EmptyState } from "@/components/ui/empty-state";
 import { TableSkeleton } from "@/components/ui/skeleton";

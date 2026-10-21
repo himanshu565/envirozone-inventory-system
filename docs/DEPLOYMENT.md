@@ -79,10 +79,10 @@ npm run seed -w apps/api
 ```
 
 This is idempotent — safe to run again later, it just no-ops if an account with that
-email already exists. **Before running it in production**, set `ADMIN_EMAIL` and
-`ADMIN_PASSWORD` in `apps/api`'s environment (see `.env.example`) — otherwise it
-creates `admin@envirozone.local` / `ChangeMe123!`, which is a fine default for local
-dev and a real problem anywhere public.
+email already exists. **Before running it in production**, set `ALLOW_PRODUCTION_SEED=YES`,
+`ADMIN_EMAIL`, and `ADMIN_PASSWORD` in `apps/api`'s environment (see `.env.example`).
+The script strictly refuses to run under `NODE_ENV=production` unless `ALLOW_PRODUCTION_SEED=YES`
+is provided. In development, it defaults to `admin@envirozone.local` / `ChangeMe123!`.
 
 ## 5. Run
 

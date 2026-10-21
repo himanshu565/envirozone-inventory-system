@@ -72,21 +72,24 @@ npm run seed -w apps/api
 ```
 
 Set `ADMIN_EMAIL`, `ADMIN_PASSWORD`, and `ADMIN_NAME` before seeding any
-non-local environment. The seed command is never run automatically by the API.
+non-local environment. In production (`NODE_ENV=production`), the script also
+strictly requires `ALLOW_PRODUCTION_SEED=YES`. The seed command is never run
+automatically by the API.
 
 ## Tests and builds
 
 ```bash
-npm run typecheck -w apps/api
-npm run lint -w apps/web
-npm run test:stock-ledger -w apps/api
-npm run test:reports -w apps/api
+npm run typecheck
+npm run lint
+npm test
 npm run build
 ```
 
-PostgreSQL integration tests require `STOCK_TEST_DATABASE_URL`. It must be a
-separate local disposable database whose name contains `test`, `ci`, `tmp`, or
-`temp`; the tests refuse development or production-looking URLs.
+PostgreSQL integration tests require `STOCK_TEST_DATABASE_URL`:
+
+```bash
+npm run test:integration
+```
 
 ## Deployment and backups
 

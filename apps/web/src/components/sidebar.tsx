@@ -14,6 +14,7 @@ import {
   Wrench,
   CheckSquare,
   BarChart3,
+  BookOpen,
 } from "lucide-react";
 import type { Role } from "@envirozone/auth";
 
@@ -30,6 +31,7 @@ const NAV_ITEMS: {
   { href: "/work-orders", label: "Work Orders", icon: Wrench },
   { href: "/calibrations", label: "Calibrations", icon: CheckSquare },
   { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/knowledge", label: "Manuals & AI", icon: BookOpen },
   { href: "/purchase-orders", label: "Purchase Orders", icon: ClipboardList },
   { href: "/users", label: "Users", icon: UsersIcon, adminOnly: true },
   { href: "/audit-log", label: "Audit Log", icon: History, adminOnly: true },

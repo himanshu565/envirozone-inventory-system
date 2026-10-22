@@ -26,7 +26,9 @@ learning them under pressure on a large one.
 7. [Configuration files](#7-configuration-files)
 8. [End-to-end walkthroughs](#8-end-to-end-walkthroughs)
 9. [Production-grade patterns used here (glossary)](#9-production-grade-patterns-used-here-glossary)
-10. [What's still missing (and why that's OK for now)](#10-whats-still-missing)
+10. [Architecture Evolutions & Completed Capabilities](#10-architecture-evolutions--completed-capabilities)
+11. [Technical Assistant & Approved Knowledge Base (RAG)](#11-technical-assistant--approved-knowledge-base-rag)
+12. [Remaining Future Enhancements](#12-remaining-future-enhancements)
 
 See also [DEPLOYMENT.md](./DEPLOYMENT.md) for how to actually ship this somewhere — this
 guide is about *why* the code is shaped the way it is, not the deploy mechanics.
@@ -1410,80 +1412,78 @@ recognizing anywhere you see them:
 
 ---
 
-## 10. What's still missing
+## 10. Architecture Evolutions & Completed Capabilities
 
-Being honest about the current state, so nothing here is mistaken for an oversight rather than
-a "not built yet." The core business workflow is done now — items, categories, suppliers,
-locations, the stock ledger, purchase orders (including receiving), organization settings, and
-RBAC all exist and are exercised end to end. What's left is mostly operational hardening, not
-missing features:
+Through deliberate incremental phases, the platform has evolved from a basic inventory ledger into an end-to-end environmental equipment lifecycle management system:
 
-- **`viewReports` is a dead permission** — it's in `rbac.ts`'s matrix, assigned to `ADMIN`,
-  `STORE_MANAGER`, and `ACCOUNTS`, and checked by exactly zero routes. This is the same state
-  `managePurchaseOrders` was in until this project's purchase-orders feature got built — worth
-  reading as "the next business feature, already reserved a permission" rather than dead code to
-  delete. There's no dedicated reports view yet; the dashboard's stat cards and low-stock table
-  are the closest thing today, and they don't check this permission at all (they're visible to
-  every authenticated role).
-- **The audit log has no reader** — `recordAudit` is called from every mutating route (3.3,
-  5.9), so the *data* — who changed what, when — is all there, sitting in `AuditLog`. Nothing
-  reads it back: no `GET` route, no admin page. It's being recorded for a future that hasn't
-  arrived yet, not being recorded for no reason.
-- **No rate limiting** — `/api/auth/login` has no protection against a brute-force
-  password-guessing script hammering it. Now that this project is meant to actually be deployed
-  (see [DEPLOYMENT.md](./DEPLOYMENT.md)), this is the single most important gap left to close.
-- **No session revocation** — see section 4; a compromised token is valid until it expires,
-  with no "log out everywhere" mechanism yet.
-- **No automated tests, no CI** — the `server.ts`/`app.ts` split (5.1) was specifically built to
-  make integration testing straightforward later; nothing exercises that possibility yet, and
-  nothing runs `tsc`/lint/migration checks automatically on a push or PR. Every verification
-  this project has had so far has been a human (or an agent) running the checks by hand each
-  time — that doesn't scale past one contributor for long.
-- **No password reset / email verification flow** — an admin creates every account with a
-  password directly (5.8); there's no "forgot password" or email-confirmation story.
-- **No structured logging or monitoring** — errors go to `console.error`; nothing is shipped to
-  an aggregator, and there's no request logging beyond Express's defaults.
-- **Dependencies need periodic re-auditing, not a one-time check** — this project shipped with a
-  *critical* unauthenticated-RCE advisory sitting in its exact pinned Next.js version for a
-  while before anyone ran `npm audit` and caught it (now patched — see `DEPLOYMENT.md`'s git
-  history). `npm audit` costs nothing to run and nothing here runs it automatically; it should
-  become a CI check the moment CI exists, not something that depends on someone remembering.
+### 10.1 Location-Aware Stock & Zero-Sum Transfers
+- **`LocationStockBalance`**: Stores discrete balance per `(itemId, locationId)`.
+- **Atomic Semantics**:
+  - `INWARD`: Increases destination location balance and global total.
+  - `OUTWARD`: Decreases source location balance and global total (prevents overselling).
+  - `ADJUSTMENT`: Signed correction applied to selected location.
+  - `TRANSFER`: Decreases source location and increases destination location without changing organization-wide stock.
+- **Deadlock-Free Locking**: Location locks are acquired in strictly ascending order within PostgreSQL serializable transactions.
+- **Historical Backfill**: Historical rows are not guessed; `npm run stock:locations:backfill` runs dry-run reconciliation first and requires explicit `LOCATION_BACKFILL_ALLOW_APPLY=YES`.
 
-None of these are wrong to be missing at this stage — they're the next things to reach for, in
-roughly the order a real production rollout would force them into priority. See
-[DEPLOYMENT.md](./DEPLOYMENT.md#7-known-gaps-worth-knowing-before-you-ship) for the subset of
-this list that specifically matters before a first deploy.
-## Location-aware stock
+### 10.2 Purchase Order Receiving & Idempotency
+- **Idempotency Contract**: Mutating endpoints accept `Idempotency-Key` headers scoped to actor and tenant.
+- **Atomic Receiving**: Receiving validates remaining quantity, creates stock transactions, updates received counters, transitions PO status (`PARTIALLY_RECEIVED` vs `RECEIVED`), and records audit entries within one transaction.
+- **Retry Safety**: Re-submitting the same key replays the cached response; payload changes return HTTP 409 Conflict.
 
-The location-aware ledger is additive. `LocationStockBalance` stores the current
-quantity for an `(item, location)` pair. `INWARD` adds to `toLocationId`,
-`OUTWARD` subtracts from `fromLocationId`, and a signed `ADJUSTMENT` changes the
-selected location. A `TRANSFER` requires distinct source and destination
-locations, subtracts from the source, adds to the destination, and contributes
-zero to the organization-wide item total. Source balances are locked in sorted
-location order inside the same serializable transaction as the ledger row and
-audit record.
+### 10.3 Serialized Equipment Lifecycle, Work Orders & Calibrations
+- **Asset Registration**: Opt-in via `Item.trackingMode = 'SERIALIZED'`. Each physical unit receives a unique asset tag and serial number.
+- **Calibration Engine**: Records certificates, next due dates, and test outcomes. If calibration fails, the asset is automatically quarantined (`status: 'UNDER_MAINTENANCE'`) to prevent deployment of compromised sensors.
+- **Work Orders**: Tracks maintenance tasks, technician assignments, and parts allocation from inventory.
 
-Historical rows are not guessed. The
-`npm run stock:locations:backfill -w apps/api` command is a dry run by default.
-It only considers rows whose location metadata unambiguously identifies the
-affected location; rows with missing or ambiguous locations are reported as
-skipped. Applying requires `--apply`,
-`LOCATION_BACKFILL_ALLOW_APPLY=YES`, and a reviewed backup/restore plan. The
-migration itself creates no balance rows.
+### 10.4 Trusted Reports & Analytics
+- **Reconciled Metrics**: All dashboard and report figures (`/reports`) are derived directly from the immutable transaction ledger and purchase order item tables.
+- **Progress Tracking**: PO receipt percentages, net stock changes, and calibration urgency buckets (`OVERDUE`, `DUE_SOON`, `OK`, `UNCALIBRATED`) are calculated deterministically.
 
-## Serialized asset foundation
+### 10.5 Security, Reliability & CI Automation
+- **Authentication & Rate Limiting**: `/api/auth/login` is protected by `express-rate-limit` (10 requests / 15 minutes with draft-8 headers).
+- **Request Tracing**: `x-request-id` header generated and propagated across all requests and structured error logs.
+- **Seed Guardrails**: Seeding under `NODE_ENV=production` strictly refuses to run without `ALLOW_PRODUCTION_SEED=YES`.
+- **Test Automation & CI**: 51 comprehensive unit tests covering permissions, stock ledger, idempotency, reports, and knowledge retrieval. GitHub Actions CI provisions a PostgreSQL 17 Alpine service container to verify integration suites on disposable databases.
 
-Serialized equipment is opt-in through `Item.trackingMode`. Existing and new
-quantity-based items default to `QUANTITY`; only items explicitly marked
-`SERIALIZED` can receive a record in `SerializedAsset`. An asset has a unique
-asset tag, an optional unique serial number, lifecycle status, optional current
-location and assigned user, and optional purchase, warranty, and notes fields.
+---
 
-`/api/assets` currently supports authenticated listing, detail retrieval, and
-master-data-authorized registration. Registration validates the model tracking
-mode and all related IDs, starts in `IN_STOCK`, and writes its `AuditLog` row in
-the same transaction. The additive migration does not infer assets from
-historical quantity transactions. Transfers, asset history, maintenance,
-calibration tasks, and reminders are intentionally deferred to the next
-workflow phase.
+## 11. Technical Assistant & Approved Knowledge Base (RAG)
+
+An optional, citation-bearing knowledge assistant (`/knowledge`) allows operators to query equipment manuals, calibration guides, and standard operating procedures (SOPs).
+
+### 11.1 Document Ingestion & Approval State Machine
+- **Format Support**: Markdown (`text/markdown`), plain text (`text/plain`), and extracted PDF text (`application/pdf`).
+- **Review Lifecycle**:
+  ```
+  [Uploaded] ──> [REVIEW_REQUIRED] ──┬──> [APPROVED] (Active in Retrieval Corpus)
+                                     ├──> [REJECTED]
+                                     └──> [RETIRED] (Archived / Deprecated)
+  ```
+- **Administrative Control**: Only `ADMIN` and `STORE_MANAGER` can approve, reject, retire, or delete manuals (`approveKnowledgeDocuments`, `manageKnowledgeDocuments`).
+
+### 11.2 Semantic Chunking with Heading & Page Inheritance
+- **Chunk Size & Overlap**: 1,200 character target with 180 character overlap, splitting on clean heading (`\n#`) and page boundaries.
+- **Context Preservation**: Every chunk automatically inherits the active `pageNumber` (from `[page:X]` or `--- Page X ---`) and hierarchical `sectionTitle` (from CommonMark headings) from previous segments.
+
+### 11.3 Untrusted Context Sandbox & Safety Invariants
+- **Prompt Fencing**: All candidate manual chunks are sandboxed inside `<untrusted_document_context>...</untrusted_document_context>`.
+- **Injection Defense**: The system prompt explicitly commands the model to treat manual text as inert third-party reference data, never following commands like `SYSTEM OVERRIDE` or instruction overrides embedded inside manuals.
+- **Zero Mutation Authority**: The assistant has no tool-calling hooks, no write access to stock or orders, and cannot perform mutations under any circumstances.
+- **Grounded Refusals**: When evidence is missing or below relevance thresholds, the assistant deterministically returns:
+  `"I could not find sufficient approved documentation to answer that reliably."`
+
+### 11.4 Multi-Tenant Scoping & Provider Decoupling
+- **Tenant Isolation**: Queries filter `status = 'APPROVED'` and match `organizationId = actorOrgId OR organizationId IS NULL` (global manuals). Cross-tenant access is impossible.
+- **Retrieval-Only Fallback**: If `AI_ENABLED !== "true"` and `AI_ALLOW_RETRIEVAL_ONLY === "true"`, the assistant operates in zero-cost retrieval mode, displaying matching manual excerpts and page citations directly.
+- **Provider Resilience**: Provider timeouts (default 10s) and network errors return HTTP 503 without crashing the server.
+
+---
+
+## 12. Remaining Future Enhancements
+
+These represent planned future extensions:
+- **Session Revocation Store**: Distributed token denylist in Redis for instant "log out everywhere" capability.
+- **Automated Email Dispatch**: SMTP / transactional email provider for automated password resets and overdue calibration notifications.
+- **Centralized Log Forwarding**: Shipping structured logs to an external collector (e.g. OpenTelemetry, Datadog, or Grafana Loki).
+
